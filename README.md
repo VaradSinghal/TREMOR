@@ -1,5 +1,5 @@
 <p align="center">
-  <h1 align="center">🌊 TREMOR</h1>
+  <h1 align="center">TREMOR</h1>
   <p align="center"><strong>Trend-aware Real-time Event Monitoring & Outlier Response</strong></p>
   <p align="center"><em>Feel the tremor before the quake.</em></p>
 </p>
@@ -144,17 +144,6 @@ _Results will be published after Phase 6._
 | Tests | pytest, pytest-asyncio, hypothesis, moto |
 | Quality | ruff, black, mypy --strict (core/) |
 | Ops | Docker, docker-compose, GitHub Actions, Terraform |
-
----
-
-## Team
-
-| Member | Role | Primary Scope |
-|--------|------|---------------|
-| **Mokshad** | Ingestion & Core Engine | Tailer, parser, redaction, windows, template miner, simulator |
-| **Kostubh** | Detection & Alerts | Baseline, detectors, severity, alert lifecycle, DB/API, eval harness |
-| **Sara** | Sinks & Infrastructure | AWS sinks, CI/CD, Docker, Terraform, deployment |
-| **Varad** | Frontend & Integration | React dashboard, WS client, docs, README, demo |
 
 ---
 
