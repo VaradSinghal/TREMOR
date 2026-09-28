@@ -60,6 +60,33 @@ docker compose up --build
 
 ---
 
+## Infrastructure (AWS & Docker)
+
+TREMOR is designed to run in Docker and integrate natively with AWS. 
+
+### Local Development
+To run locally with real AWS integration:
+1. Ensure your AWS credentials are set in `.env` (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`).
+2. Run `docker-compose up --build -d`.
+3. The backend container automatically inherits your AWS credentials from `.env` and uses `boto3` to communicate with AWS.
+
+### Production Deployment (Terraform)
+We provide a complete Terraform module for production AWS infrastructure.
+```bash
+cd infra/terraform
+terraform init
+terraform apply -var="alert_email=you@example.com" -var="environment=prod"
+```
+**This provisions:**
+- **SNS Topic & Subscription:** For email/SMS routing of `HIGH` and `CRITICAL` alerts.
+- **CloudWatch Log Group (`/tremor/alerts`):** For structured JSON audit trails of all alerts.
+- **IAM Role & Instance Profile:** Attach this profile to your EC2/ECS servers so TREMOR can authenticate without hardcoded keys.
+- **CloudWatch Alarms:** Secondary safety nets for extreme error rates.
+
+See the complete [Setup Guide](tremor_aws_docker_setup.md) (or artifact) for full details.
+
+---
+
 ## Architecture
 
 ```
