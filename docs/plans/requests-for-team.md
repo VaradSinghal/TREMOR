@@ -10,7 +10,18 @@ Changes Mokshad needs in files owned by others. Mokshad does not edit these file
 
 `eval/run.py` replays scenarios through parser → window → baseline → detectors → alert manager.
 
-**Still open:** the full signatures (Signal type, engine, `BaselineStore`, alert lifecycle). Kostubh is writing them to `docs/DETECTION_API.md`. The must-haves (baseline, error rate, silence, alert lifecycle, engine) land on main as one PR. New-pattern and latency follow in a second PR. Eval starts once the first PR is merged.
+**Signatures received** (`docs/DETECTION_API.md`, 2026-09-28): `DetectionEngine.observe(event, arrival, template_id, is_new_template)` / `tick(now) -> TickResult`, `Signal`, `AlertManager.process`, and the `Detector` protocol. Eval starts once Kostubh's first PR (engine, baseline, error rate, silence, alerts) and my templates and simulator PRs are merged to main.
+
+### Open questions on DETECTION_API.md (from Mokshad)
+
+1. **`is_new` meaning conflicts with what we agreed.** `TemplateMinerLike.is_new` and `Observation.is_new_template` are documented as "true iff the most recent `add_message()` call created this template". We agreed my miner is the only definition of "new", and it is richer than that:
+   - true when the template was first seen after the miner's warm-up, or when a rare template surges (at least 3 times in 60 s)
+   - stays true for 300 s
+
+   Your detector dedups per template id, so a flag that stays true for a while is harmless. Please reword both docstrings to "true while the shared TemplateMiner considers the template new", or tell me if you really need "created on this line" instead.
+2. **Per-service or whole-stream?** `DetectionEngine(service="*")` watches the whole stream, but eval labels (and real incidents) are per service. For example, payment-gateway going quiet while auth and ledger keep logging never trips a whole-stream `SilenceDetector`. Does `DetectionEngine(service="payment-gateway")` only consider that service's events, or should the pipeline route each event to a per-service engine? Eval will run one engine per service unless you say otherwise.
+3. **Warm-up length in ticks.** My scenarios keep traffic clean for 360 s before any anomaly. Please confirm that the default `Settings` warm-up is 360 ticks or fewer.
+4. **`TemplateHint.template_id`:** please confirm it is now `str`.
 
 ### Agreed with Kostubh (recorded 2026-09-28)
 
