@@ -10,8 +10,8 @@ returns the alerts *opened* on that tick. Nothing here reads a clock.
 - ``RollingMeanDetector``: fires ERROR_RATE when the rate exceeds twice its own
   rolling mean. There is no seasonality, no spread estimate and no baseline
   freeze, so a slow drift gets absorbed into the mean.
-- ``TremorDetector``: adapter for ``app.core.engine.DetectionEngine``. It raises
-  ``NotImplementedError`` until Kostubh's engine is merged.
+- ``TremorDetector``: adapter for ``app.core.engine.DetectionEngine``, one engine per
+  service.
 
 Both baselines cover ERROR_RATE only. Eval reports an ERROR_RATE-only table so
 they are compared fairly.
@@ -21,12 +21,16 @@ Owner: Mokshad (Phase 6)
 
 from __future__ import annotations
 
-import importlib
+import itertools
 from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from eval.metrics import EvalAlert
+from app.config import Settings
+from app.core.alerts import AlertStatus
+from app.core.engine import DetectionEngine
+from app.core.severity import Severity
+from eval.metrics import WHOLE_STREAM, EvalAlert
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -199,22 +203,46 @@ class RollingMeanDetector:
 
 
 class TremorDetector:
-    """Adapter for Kostubh's ``DetectionEngine`` (see docs/DETECTION_API.md).
+    """Adapter for Kostubh's ``DetectionEngine`` (docs/DETECTION_API.md).
 
-    Raises ``NotImplementedError`` while ``app.core.engine`` is not on main, so the
-    harness can still run the baselines.
+    ``DetectionEngine.observe`` does not filter by ``event.service``: one engine
+    watches whatever it is fed. By default this adapter therefore runs **one engine
+    per service**, created on the service's first line, and routes each line to its
+    own engine, as the production pipeline must do too. ``per_service=False`` feeds
+    everything into a single whole-stream (``"*"``) engine instead.
+
+    An incident is reported once: at its first OPEN/ESCALATED alert whose severity is
+    at least ``min_severity``. ``"INFO"`` counts every incident; ``"WARNING"`` counts
+    only what would page someone, timed from when it reached WARNING.
     """
 
     name = "TREMOR"
 
-    def __init__(self, service: str = "*") -> None:
-        try:
-            engine_mod = importlib.import_module("app.core.engine")
-        except ImportError as exc:
-            raise NotImplementedError("app.core.engine.DetectionEngine is not merged yet") from exc
-        from app.config import Settings
+    def __init__(
+        self,
+        per_service: bool = True,
+        cfg: Settings | None = None,
+        min_severity: str = "INFO",
+    ) -> None:
+        self._per_service = per_service
+        self._min_severity = Severity[min_severity]
+        self._reported: set[str] = set()
+        if min_severity != "INFO":
+            self.name = f"TREMOR ({min_severity}+)"
+        self._cfg = cfg if cfg is not None else Settings(_env_file=None)
+        self._engines: dict[str, DetectionEngine] = {}
+        self._ids = itertools.count(1)
 
-        self._engine = engine_mod.DetectionEngine(Settings(_env_file=None), service=service)
+    def _engine(self, service: str) -> DetectionEngine:
+        key = service if self._per_service else WHOLE_STREAM
+        engine = self._engines.get(key)
+        if engine is None:
+            engine = DetectionEngine(self._cfg, service=key, id_factory=self._next_id)
+            self._engines[key] = engine
+        return engine
+
+    def _next_id(self) -> str:
+        return f"a{next(self._ids)}"  # deterministic ids keep replays reproducible
 
     def observe(
         self,
@@ -223,23 +251,31 @@ class TremorDetector:
         template_id: str | None = None,
         is_new_template: bool = False,
     ) -> None:
-        """Forward to ``DetectionEngine.observe``."""
-        self._engine.observe(
+        """Route the line to its service's engine."""
+        self._engine(event.service).observe(
             event, arrival, template_id=template_id, is_new_template=is_new_template
         )
 
     def tick(self, now: float) -> list[EvalAlert]:
-        """Forward to ``DetectionEngine.tick``; keep only alerts that open an incident."""
-        result = self._engine.tick(now)
-        return [
-            EvalAlert(ts=now, signal_type=str(a.signal_type), service=a.service)
-            for a in result.alerts
-            if str(a.status) == "OPEN"
-        ]
+        """Tick every engine; report each incident once it reaches ``min_severity``."""
+        opened: list[EvalAlert] = []
+        for key in sorted(self._engines):
+            for alert in self._engines[key].tick(now).alerts:
+                if alert.status not in (AlertStatus.OPEN, AlertStatus.ESCALATED):
+                    continue
+                incident = alert.incident_id or alert.id
+                if alert.status is AlertStatus.OPEN:
+                    self._reported.discard(incident)  # a re-open is a new incident
+                if incident in self._reported or Severity[alert.severity] < self._min_severity:
+                    continue
+                self._reported.add(incident)
+                opened.append(EvalAlert(now, alert.signal_type.value, alert.service))
+        return opened
 
 
 DETECTORS: dict[str, Callable[[], EvalDetector]] = {
     TremorDetector.name: TremorDetector,
+    "TREMOR (WARNING+)": lambda: TremorDetector(min_severity="WARNING"),
     StaticThresholdDetector.name: StaticThresholdDetector,
     RollingMeanDetector.name: RollingMeanDetector,
 }

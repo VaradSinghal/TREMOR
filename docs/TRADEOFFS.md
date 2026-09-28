@@ -65,3 +65,11 @@ _Each team member should add their decisions here as they implement their compon
 ### Baselines cover ERROR_RATE only
 - **Decision:** The static 5% and rolling-mean baselines only detect error rate. EVAL.md reports an overall table and an ERROR_RATE-only table.
 - **Tradeoff:** The overall table shows what TREMOR adds (silence, new pattern, latency). The ERROR_RATE-only table is the apples-to-apples comparison.
+
+### Eval reports TREMOR at INFO+ and WARNING+
+- **Decision:** EVAL.md shows TREMOR twice. The first column counts every incident. The second, "TREMOR (WARNING+)", counts an incident only from its first alert at WARNING or above.
+- **Tradeoff:** INFO incidents (z ≥ 2–3) are informational, not pages, and scoring them as pages would overstate the noise. Showing both views keeps the INFO noise visible instead of hiding it; the baselines have no severity, so every alert they raise counts.
+
+### One detection engine per service
+- **Decision:** Eval (and the production pipeline) route each event to its own service's `DetectionEngine`.
+- **Tradeoff:** Baselines are learned per service, and a single quiet service is detectable. The cost is N engines instead of one. A whole-stream engine misses single-service silence entirely.
