@@ -71,6 +71,13 @@ class SNSSink:
         # SNS subject is capped at 100 chars
         subject = subject[:100]
 
+        # Extract relevant detection fields for the email details
+        details = {
+            k: v for k, v in event.items() 
+            if k in {"value", "baseline", "z_score", "lines", "errors", "reason", "template_id"} 
+            and v is not None
+        }
+
         message_body = {
             "default": json.dumps(event, default=str),
             "email": (
@@ -79,7 +86,7 @@ class SNSSink:
                 f"Signal: {signal_type}\n"
                 f"Status: {status}\n"
                 f"Alert ID: {alert_id}\n\n"
-                f"Details: {json.dumps(event.get('explanation', {}), indent=2, default=str)}"
+                f"Details:\n{json.dumps(details, indent=2, default=str)}"
             ),
         }
 
