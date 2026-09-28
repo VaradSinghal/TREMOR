@@ -16,12 +16,19 @@ It cannot be built until these interfaces exist, even as final signatures with s
 3. **`BaselineStore`.** Final signatures for `update` / `get` / `freeze` / `unfreeze` / `is_warm`.
 4. **`AlertManager`.** Final signatures for `process_signal` / `resolve` / `get_active`.
 
-### FYI: TemplateMiner API (`app/core/templates.py`)
+### Delivered: TemplateMiner API (`app/core/templates.py`)
 
-- Template IDs are `int`, which matches `alerts.TemplateHint.template_id`.
-- `add_message(message, *, service="_global", ts=None) -> int`
+Kostubh asked for `add_message(message) -> str` returning an id that is stable per pattern. That is done on `feat/mokshad-templates`:
+
+- `add_message(message) -> str` returns ids like `"T12"`. The extra keyword-only args are optional: `service="_global"` and `ts=None` (defaults to `clock.now()`).
+- Every message of the same pattern gets the same id. Numbers, UUIDs, IPs, hex and `txn_`/`acct_`-style ids, and redacted PII (`<EMAIL>`, `<CARD>`…) are masked first.
+- Ids are stable for the whole run, and across `persist`/`restore`. The one exception: if more than `max_clusters` patterns (default 1000) exist, the least-recently-used pattern is evicted and gets a new id if it comes back.
+- **Kostubh:** please change `alerts.TemplateHint.template_id` to `str`, as agreed.
+
+Optional extras, if they save you work:
+
 - `is_new(template_id, now=None) -> bool`: true when the template was first seen after warm-up, or was rare (below the rarity threshold) when it reappeared. The flag stays set for `novelty_ttl_s`.
-- `new_templates_in_window(window_s, *, service=None) -> dict[int, int]`: returns `{template_id: count}` for new templates seen in the last `window_s` seconds. It is intended for the new_pattern detector's "K+ times in a window" rule.
+- `new_templates_in_window(window_s, *, service=None) -> dict[str, int]`: returns `{template_id: count}` for new templates seen in the last `window_s` seconds.
 - `count_in_window(template_id, window_s, *, service=None) -> int`
 - `get_top_templates(n, *, service=None, window_s=None) -> list[TemplateInfo]`: for alert root-cause hints.
 - `tick()`: call once per tick to evict old window buckets, the same as `WindowEngine.tick()`.

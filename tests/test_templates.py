@@ -86,6 +86,22 @@ def test_same_message_same_id() -> None:
     assert miner.add_message(msg) == miner.add_message(msg) == miner.add_message(msg)
 
 
+def test_ids_are_strings_stable_per_pattern() -> None:
+    miner = make_miner()
+    ids = [miner.add_message(f"Ledger reconcile completed for batch {i}") for i in range(5)]
+    assert ids == ["T1"] * 5
+    assert miner.add_message("Completely unrelated auth event") == "T2"
+
+
+def test_unknown_or_malformed_id_is_harmless() -> None:
+    miner = make_miner()
+    miner.add_message("hello world")
+    assert not miner.is_new("nope")
+    assert miner.count_in_window("nope", 10) == 0
+    with pytest.raises(KeyError):
+        miner.get_template("nope")
+
+
 def test_distinct_messages_distinct_ids() -> None:
     miner = make_miner()
     ids = {miner.add_message(fill(shape, 7)) for shape in SHAPES}
@@ -110,7 +126,7 @@ def test_template_info_fields() -> None:
 
 def test_unknown_template_raises() -> None:
     with pytest.raises(KeyError):
-        make_miner().get_template(999)
+        make_miner().get_template("T999")
 
 
 def test_ts_defaults_to_clock() -> None:
@@ -160,7 +176,7 @@ def test_rare_template_reappearing_is_new_common_is_not() -> None:
 
 
 def test_is_new_unknown_id_is_false() -> None:
-    assert not make_miner().is_new(12345)
+    assert not make_miner().is_new("T12345")
 
 
 # ── Windowed counts ───────────────────────────────────────────────────
@@ -203,7 +219,7 @@ def test_late_event_lands_in_its_bucket() -> None:
 
 def test_window_larger_than_max_rejected() -> None:
     with pytest.raises(ValueError):
-        make_miner(max_window_s=60).count_in_window(1, 61)
+        make_miner(max_window_s=60).count_in_window("T1", 61)
 
 
 def test_new_templates_in_window() -> None:
@@ -235,6 +251,16 @@ def test_top_templates_order_and_ties() -> None:
     assert [t.id for t in top] == [c, a, b]  # c=2, then a/b tie broken by lower id
     assert [t.count for t in top] == [2, 1, 1]
     assert len(miner.get_top_templates(1)) == 1
+
+
+def test_top_template_ties_use_numeric_id_order() -> None:
+    miner = make_miner()
+    words = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"]
+    ids = [miner.add_message(f"{w} {w} {w} {w}") for w in words]  # T1..T6
+    ids += [miner.add_message(f"{w} {w} {w}") for w in words]  # T7..T12, all count 1
+    top = [t.id for t in miner.get_top_templates(12)]
+    assert top == sorted(ids, key=lambda t: int(t[1:]))
+    assert top.index("T2") < top.index("T10")
 
 
 def test_top_templates_filtered_by_service_and_window() -> None:
@@ -318,7 +344,7 @@ def test_property_ids_deterministic(seq: list[tuple[int, int]]) -> None:
 def test_property_shape_maps_to_one_stable_id(seq: list[tuple[int, int]]) -> None:
     """Every message of a shape gets the same id, and restore keeps it."""
     miner = make_miner()
-    seen: dict[int, int] = {}
+    seen: dict[int, str] = {}
     for s, n in seq:
         tid = miner.add_message(fill(SHAPES[s], n))
         assert seen.setdefault(s, tid) == tid
