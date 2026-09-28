@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import "./LandingPage.css";
 
 function LandingPage() {
@@ -7,8 +8,10 @@ function LandingPage() {
         <div className="landing-logo">TREMOR</div>
 
         <div className="landing-nav-links">
-          <a href="#how-it-works">How it works</a>
-          <a href="/dashboard">Dashboard</a>
+          <Link to="/how-it-works">How it works</Link>
+
+          <Link to="/dashboard">Dashboard</Link>
+
           <a
             href="https://github.com/VaradSinghal/TREMOR"
             target="_blank"
@@ -37,12 +40,12 @@ function LandingPage() {
           </p>
 
           <div className="landing-actions">
-            <a
-              href="/dashboard"
+            <Link
+              to="/dashboard"
               className="landing-button landing-button-primary"
             >
               Launch Dashboard
-            </a>
+            </Link>
 
             <a
               href="https://github.com/VaradSinghal/TREMOR"
