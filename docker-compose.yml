@@ -1,0 +1,57 @@
+services:
+  # ── TREMOR Backend ──────────────────────────────────────────────────
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///./data/tremor.db
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - DRY_RUN=false
+      - DEMO_MODE=true
+      - LOG_PATHS=./sample/app.log
+    volumes:
+      - ./sample:/app/sample
+      - tremor-data:/app/data
+    depends_on:
+      localstack:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+
+  # ── Frontend ────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  # ── LocalStack (AWS emulator) ──────────────────────────────────────
+  localstack:
+    image: localstack/localstack:3
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=sns,logs,cloudwatch
+      - DEFAULT_REGION=us-east-1
+    volumes:
+      - localstack-data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  tremor-data:
+  localstack-data:
