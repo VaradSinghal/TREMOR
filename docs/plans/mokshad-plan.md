@@ -101,7 +101,7 @@ class TemplateMiner:
 - **Determinism:** there is no drain3 persistence handler during normal operation, so drain3 never calls `time.time()` on the hot path. drain3 is deterministic for the same input order. Tie-breaks in `get_top_templates` are (count desc, id asc).
 - **Novelty:** warm-up ends at the first message's ts + `warmup_seconds`. A template becomes novel at time `t` when either:
   - it is first seen after warm-up, or
-  - it is seen after warm-up while its prior rarity (`count / total` before this message) is below `rarity_threshold` and it isn't already novel.
+  - it is historically rare (`count / total` before the surge is below `rarity_threshold`) and it surges after warm-up: at least `rare_surge_count` (3) occurrences within `rare_surge_window_s` (60 s), and it isn't already novel. (A single reappearance used to be enough; changed 2026-09-28 because Kostubh's detector opens an incident per new template with no minimum count.)
 
   `is_new` returns true while `now - novel_at <= novelty_ttl_s`, so the flag is stable for a whole incident and does not flap as the count grows.
 - **Per-window counter:** each service keeps a `deque[(second, Counter[int])]` of 1 s buckets, bounded to `max_window_s`, using the same pattern as `WindowEngine`. Buckets are evicted on `tick()` and on insert. A late event goes into the matching bucket if it is still retained.

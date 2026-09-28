@@ -41,7 +41,7 @@ Kostubh asked for `add_message(message) -> str` returning an id that is stable p
 
 Optional extras, if they save you work:
 
-- `is_new(template_id, now=None) -> bool`: true when the template was first seen after warm-up, or was rare (below the rarity threshold) when it reappeared. The flag stays set for `novelty_ttl_s`.
+- `is_new(template_id, now=None) -> bool`: true when the template was first seen after warm-up, or when a historically rare template (below the rarity threshold) surges, meaning it appears at least 3 times within 60 s. A single reappearance of an occasional line is not new. The flag stays set for `novelty_ttl_s` (300 s).
 - `new_templates_in_window(window_s, *, service=None) -> dict[str, int]`: returns `{template_id: count}` for new templates seen in the last `window_s` seconds.
 - `count_in_window(template_id, window_s, *, service=None) -> int`
 - `get_top_templates(n, *, service=None, window_s=None) -> list[TemplateInfo]`: for alert root-cause hints.
