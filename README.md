@@ -235,5 +235,6 @@ MIT
 ## Docs
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Detection Engine & Baselines](docs/DETECTION_ENGINE.md)
 - [Tradeoffs & Decisions](docs/TRADEOFFS.md)
 - [Evaluation Results](docs/EVAL.md)
