@@ -14,7 +14,13 @@ Owner: Mokshad (Phase 1)
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
+
+from app.ingest.redact import redact
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,13 +34,6 @@ class LogEvent:
     duration_ms: float | None = None
     raw_len: int = 0
 
-
-import json
-import re
-from datetime import datetime
-from typing import Any
-
-from app.ingest.redact import redact
 
 # Common log prefix regex: ISO8601 LEVEL SERVICE message...
 # Example: 2026-01-01T12:00:00.123Z ERROR payment-gateway Transaction failed...
@@ -97,7 +96,7 @@ def parse_line(raw: str, default_service: str = "unknown") -> LogEvent | None:
             ts_val = data.get("timestamp") or data.get("ts") or data.get("time")
             if ts_val is None:
                 raise ValueError("Missing timestamp")
-            
+
             # Handle numeric vs string timestamps
             if isinstance(ts_val, (int, float)):
                 ts = float(ts_val)
@@ -114,7 +113,7 @@ def parse_line(raw: str, default_service: str = "unknown") -> LogEvent | None:
             service = str(data.get("service", default_service))
             message = str(data.get("message", data.get("msg", "")))
             duration_ms = data.get("duration_ms")
-            
+
             if duration_ms is not None:
                 try:
                     duration_ms = float(duration_ms)
