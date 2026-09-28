@@ -6,8 +6,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
-
 from app.ingest.parser import LogEvent
 from eval.detectors import (
     DETECTORS,
@@ -90,15 +88,56 @@ def test_rolling_mean_waits_for_history() -> None:
     assert alerts == []
 
 
-def test_tremor_adapter_is_stubbed_until_engine_lands() -> None:
-    try:
-        import app.core.engine  # noqa: F401
-    except ImportError:
-        with pytest.raises(NotImplementedError):
-            TremorDetector()
-    else:  # pragma: no cover - once Kostubh's engine is merged
-        pytest.skip("engine merged; covered by eval run tests")
+def drive_tremor(det: TremorDetector, seconds: range, plan: dict[str, int | None]) -> list[str]:
+    """Each second, every service in ``plan`` logs 10 lines with ``errors`` ERRORs
+    (``None`` = silent); returns "SIGNAL service" for every alert opened."""
+    opened: list[str] = []
+    for s in seconds:
+        for service, errors in plan.items():
+            if errors is None:
+                continue
+            for i in range(10):
+                arrival = T0 + s + i / 10
+                level = "ERROR" if i < errors else "INFO"
+                event = LogEvent(ts=arrival, level=level, service=service, message="m")
+                det.observe(event, arrival, template_id="T1")
+        opened += [f"{a.signal_type} {a.service}" for a in det.tick(T0 + s + 1)]
+    return opened
+
+
+def test_tremor_adapter_routes_per_service() -> None:
+    det = TremorDetector()
+    assert drive_tremor(det, range(0, 120), {"a": 0, "b": 0}) == []  # warm-up + steady
+    opened = drive_tremor(det, range(120, 150), {"a": 9, "b": 0})  # a: 90% errors
+    assert opened == ["ERROR_RATE a"]
+
+
+def test_tremor_per_service_sees_one_service_go_silent() -> None:
+    det = TremorDetector()
+    drive_tremor(det, range(0, 120), {"a": 0, "b": 0})
+    opened = drive_tremor(det, range(120, 150), {"a": None, "b": 0})
+    assert opened == ["SILENCE a"]
+
+
+def test_tremor_whole_stream_misses_single_service_silence() -> None:
+    det = TremorDetector(per_service=False)
+    drive_tremor(det, range(0, 120), {"a": 0, "b": 0})
+    assert drive_tremor(det, range(120, 150), {"a": None, "b": 0}) == []
 
 
 def test_detector_registry() -> None:
-    assert list(DETECTORS) == ["TREMOR", "Static 5%", "Rolling mean"]
+    assert list(DETECTORS) == ["TREMOR", "TREMOR (WARNING+)", "Static 5%", "Rolling mean"]
+    assert DETECTORS["TREMOR (WARNING+)"]().name == "TREMOR (WARNING+)"
+
+
+def test_tremor_min_severity_filters_info_incidents() -> None:
+    # 90% errors is CRITICAL (> rate ceiling), so it counts at any min_severity
+    for min_severity in ("INFO", "WARNING", "CRITICAL"):
+        det = TremorDetector(min_severity=min_severity)
+        drive_tremor(det, range(0, 120), {"a": 0})
+        assert drive_tremor(det, range(120, 150), {"a": 9}) == ["ERROR_RATE a"]
+    # silence is HIGH: reported at WARNING+, dropped at CRITICAL+
+    for min_severity, expected in (("WARNING", ["SILENCE a"]), ("CRITICAL", [])):
+        det = TremorDetector(min_severity=min_severity)
+        drive_tremor(det, range(0, 120), {"a": 0, "b": 0})
+        assert drive_tremor(det, range(120, 150), {"a": None, "b": 0}) == expected

@@ -84,7 +84,8 @@ LogGenerator.iter_lines() → parse_line → TemplateMiner → detector.observe(
   - Static 5%: error rate over 30 s above 5%.
   - Rolling mean: above 2× its own rolling mean; no seasonality, no spread, no freeze.
 - **Matching and metrics** (`eval/metrics.py`): see TRADEOFFS.md, "Eval matching rule". The metrics are precision, recall, F1, mean/median detection delay, FP/hour, and per-scenario correctness. They are reported overall and ERROR_RATE-only, since the baselines only detect error rate.
-- `python -m eval.run --seed 42` will regenerate `docs/EVAL.md` deterministically. The replay harness (`eval/run.py`) lands after the templates, simulator and detection PRs merge.
+- `python -m eval.run --seed 42` regenerates `docs/EVAL.md` deterministically.
+- The TREMOR adapter runs **one `DetectionEngine` per service**. `DetectionEngine.observe()` does not filter by `event.service`, so a single `"*"` engine cannot see one service go silent while others keep logging. It is reported twice: every incident (INFO+), and only incidents that reach WARNING (what would page someone).
 
 ## Data Flow
 

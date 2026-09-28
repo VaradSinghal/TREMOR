@@ -92,10 +92,7 @@ def test_harness_scores_baselines_and_reports_tremor_unavailable() -> None:
     static = runs["Static 5%"]
     assert static.result is not None and static.result.true_positives == 1
     tremor = runs["TREMOR"]
-    try:
-        import app.core.engine  # noqa: F401
-    except ImportError:
-        assert tremor.result is None and "not merged" in tremor.unavailable_reason
+    assert tremor.result is not None and tremor.result.true_positives == 1
     report = harness.compare(list(runs.values()))
     assert "## All signals" in report and "## ERROR_RATE only" in report
     assert "| tiny |" in report
