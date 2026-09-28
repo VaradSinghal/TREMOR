@@ -80,6 +80,7 @@ class _Stats:
     first_seen: float
     last_seen: float
     sample: str
+    recent: deque[float]  # timestamps of the last `rare_surge_count` occurrences
     novel_at: float | None = None
 
 
@@ -134,6 +135,8 @@ class TemplateMiner:
         warmup_seconds: int = 300,
         rarity_threshold: float = 0.001,
         novelty_ttl_s: int = 300,
+        rare_surge_count: int = 3,
+        rare_surge_window_s: int = 60,
         max_clusters: int = 1000,
         max_window_s: int = 300,
         sim_th: float = 0.4,
@@ -145,9 +148,14 @@ class TemplateMiner:
             clock: Time source used when ``add_message`` gets no ``ts``.
             warmup_seconds: Templates first seen within this many seconds of the
                 first message are "known", never "new".
-            rarity_threshold: After warm-up, a template whose share of all prior
-                messages is below this is treated as new when it shows up again.
+            rarity_threshold: A known template whose share of all prior messages
+                is below this counts as rare.
             novelty_ttl_s: How long a template stays new after becoming new.
+            rare_surge_count: After warm-up, a rare template becomes new again only
+                when it appears at least this many times within
+                ``rare_surge_window_s``. A single reappearance of an occasional
+                line is not news.
+            rare_surge_window_s: Window, in seconds, for ``rare_surge_count``.
             max_clusters: Memory cap on templates (drain3 LRU eviction).
             max_window_s: Longest window supported by the windowed counters.
             sim_th: drain3 similarity threshold.
@@ -157,6 +165,8 @@ class TemplateMiner:
         self._warmup_seconds = warmup_seconds
         self._rarity_threshold = rarity_threshold
         self._novelty_ttl_s = novelty_ttl_s
+        self._rare_surge_count = rare_surge_count
+        self._rare_surge_window_s = rare_surge_window_s
         self._max_clusters = max_clusters
         self._max_window_s = max_window_s
         self._config = _build_config(sim_th, depth, max_clusters)
@@ -196,19 +206,26 @@ class TemplateMiner:
 
         stats = self._stats.get(template_id)
         if stats is None:
-            stats = _Stats(count=0, first_seen=event_ts, last_seen=event_ts, sample=message)
+            stats = _Stats(
+                count=0,
+                first_seen=event_ts,
+                last_seen=event_ts,
+                sample=message,
+                recent=deque(maxlen=self._rare_surge_count),
+            )
             self._stats[template_id] = stats
             if len(self._stats) > self._max_clusters:
                 self._prune_evicted()
 
-        self._update_novelty(stats, event_ts)
-
+        prior_count, prior_total = stats.count, self._total
         stats.count += 1
         stats.last_seen = max(stats.last_seen, event_ts)
         stats.sample = message
+        stats.recent.append(event_ts)
         self._total += 1
         self._service_counts.setdefault(service, Counter())[template_id] += 1
         self._count_in_bucket(service, int(event_ts), template_id)
+        self._update_novelty(stats, event_ts, prior_count, prior_total)
         return template_id
 
     def tick(self) -> None:
@@ -320,17 +337,27 @@ class TemplateMiner:
         if second > self._current_s:
             self._current_s = second
 
-    def _update_novelty(self, stats: _Stats, event_ts: float) -> None:
+    def _update_novelty(
+        self, stats: _Stats, event_ts: float, prior_count: int, prior_total: int
+    ) -> None:
+        """Mark a template novel: first seen after warm-up, or a surge of a rare one."""
         if self._warmup_end is None or event_ts < self._warmup_end:
             return
-        if stats.count == 0:
+        if prior_count == 0:
             stats.novel_at = event_ts
             return
-        currently_new = (
-            stats.novel_at is not None and event_ts - stats.novel_at <= self._novelty_ttl_s
-        )
-        prior_rarity = stats.count / self._total if self._total else 0.0
-        if not currently_new and prior_rarity < self._rarity_threshold:
+        if stats.novel_at is not None and event_ts - stats.novel_at <= self._novelty_ttl_s:
+            return  # already new; keep the original onset so the flag does not flap
+        # O(1) surge check: the oldest of the last K occurrences is inside the window.
+        recent = stats.recent
+        if len(recent) < self._rare_surge_count:
+            return
+        if event_ts - recent[0] > self._rare_surge_window_s:
+            return
+        # Rarity is judged on history before the surge, so the surge itself does
+        # not make the template look common.
+        history = prior_count - (self._rare_surge_count - 1)
+        if prior_total > 0 and history / prior_total < self._rarity_threshold:
             stats.novel_at = event_ts
 
     def _count_in_bucket(self, service: str, second: int, template_id: str) -> None:
@@ -433,6 +460,7 @@ class TemplateMiner:
                 first_seen=float(t["first_seen"]),
                 last_seen=float(t["last_seen"]),
                 sample=str(t["sample"]),
+                recent=deque(maxlen=self._rare_surge_count),
                 novel_at=None if t["novel_at"] is None else float(t["novel_at"]),
             )
             for t in data["templates"]

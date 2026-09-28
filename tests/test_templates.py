@@ -162,17 +162,52 @@ def test_novelty_expires_after_ttl() -> None:
     assert not miner.is_new(fresh)
 
 
-def test_rare_template_reappearing_is_new_common_is_not() -> None:
+def _rare_setup(**kwargs: Any) -> tuple[FakeClock, TemplateMiner, str, str]:
+    """A miner past warm-up with one rare template (1 of 201) and one common one."""
     clock = FakeClock(T0)
-    miner = make_miner(clock, warmup_seconds=100, rarity_threshold=0.01)
+    miner = make_miner(clock, warmup_seconds=100, rarity_threshold=0.01, **kwargs)
     rare = miner.add_message("Rare HSM warning", ts=T0)
+    common = ""
     for i in range(200):
         common = miner.add_message(f"Payment ok {i}", ts=T0 + i * 0.1)
     clock.set(T0 + 200)
-    miner.add_message("Rare HSM warning", ts=T0 + 200)  # rarity 1/201 < 1%
-    miner.add_message("Payment ok 999", ts=T0 + 200)
-    assert miner.is_new(rare)
+    return clock, miner, rare, common
+
+
+def test_rare_template_single_reappearance_is_not_new() -> None:
+    _, miner, rare, _ = _rare_setup()
+    miner.add_message("Rare HSM warning", ts=T0 + 200)  # rare, but just once
+    assert not miner.is_new(rare)
+
+
+def test_rare_template_surge_is_new() -> None:
+    _, miner, rare, _ = _rare_setup(rare_surge_count=3, rare_surge_window_s=60)
+    miner.add_message("Rare HSM warning", ts=T0 + 200)
+    miner.add_message("Rare HSM warning", ts=T0 + 230)
+    assert not miner.is_new(rare, now=T0 + 230)
+    miner.add_message("Rare HSM warning", ts=T0 + 259)  # 3 within 60 s
+    assert miner.is_new(rare, now=T0 + 259)
+    assert miner.get_template(rare).count == 4
+
+
+def test_rare_template_slow_trickle_is_not_new() -> None:
+    _, miner, rare, _ = _rare_setup(rare_surge_count=3, rare_surge_window_s=60)
+    for ts in (T0 + 200, T0 + 240, T0 + 280, T0 + 320):  # never 3 inside 60 s
+        miner.add_message("Rare HSM warning", ts=ts)
+    assert not miner.is_new(rare, now=T0 + 320)
+
+
+def test_common_template_surge_is_not_new() -> None:
+    _, miner, _, common = _rare_setup()
+    for _ in range(10):
+        miner.add_message("Payment ok 999", ts=T0 + 200)
     assert not miner.is_new(common)
+
+
+def test_first_seen_after_warmup_is_new_immediately() -> None:
+    _, miner, _, _ = _rare_setup(rare_surge_count=3)
+    fresh = miner.add_message("Ledger shard failover started", ts=T0 + 200)
+    assert miner.is_new(fresh, now=T0 + 200)
 
 
 def test_is_new_unknown_id_is_false() -> None:
