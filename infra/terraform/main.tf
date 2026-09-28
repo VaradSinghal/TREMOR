@@ -1,7 +1,7 @@
 # ── TREMOR — Terraform Infrastructure ─────────────────────────────────
 # Resources: SNS topic + subscription, IAM role/policy, CW log group, CW alarm
 #
-# Owner: Sara (Phase 4 / Phase 7)
+# Owner: Varad (Phase 4 / Phase 7)
 
 terraform {
   required_version = ">= 1.5"
@@ -112,7 +112,10 @@ resource "aws_iam_role" "tremor" {
         Action = "sts:AssumeRole"
         Effect = "Allow"
         Principal = {
-          Service = "ec2.amazonaws.com"
+          Service = [
+            "ec2.amazonaws.com",
+            "ecs-tasks.amazonaws.com"
+          ]
         }
       }
     ]
@@ -157,6 +160,18 @@ resource "aws_iam_role_policy" "tremor" {
       }
     ]
   })
+}
+
+# ── Instance Profile (for EC2 deployments) ───────────────────────────
+
+resource "aws_iam_instance_profile" "tremor" {
+  name = "tremor-profile-${var.environment}"
+  role = aws_iam_role.tremor.name
+
+  tags = {
+    Project     = "TREMOR"
+    Environment = var.environment
+  }
 }
 
 # ── Outputs ──────────────────────────────────────────────────────────

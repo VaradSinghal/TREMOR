@@ -57,3 +57,4 @@ docker-compose.override.yml
 
 # ── Misc ─────────────────────────────────────────────────────────────
 TREMOR_ANTIGRAVITY_PROMPT.md
+infra/terraform/terraform.zip
