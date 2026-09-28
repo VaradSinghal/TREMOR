@@ -14,7 +14,7 @@ The next phases are:
 - **Phase 6:** I own the Simulator and the Eval Harness.
 
 Kostubh's modules are still TODO stubs: `baseline.py`, `severity.py`, all detectors and `AlertManager`. No `Signal` type or detector signature exists. Decisions agreed with Mokshad:
-- **Template IDs are `int`.** This matches drain3 and `alerts.TemplateHint.template_id`.
+- **Template IDs are `str`** (e.g. `"T12"`). This was changed from `int` at Kostubh's request, and `alerts.TemplateHint.template_id` is moving to `str` to match.
 - **Phase 1 lint/type fixes go inside the step 1 commit**, not a separate commit.
 - **Steps 4–5 are blocked.** Eval waits until (a) Kostubh defines the Signal, detector, BaselineStore and AlertManager interfaces, and (b) the templates and simulator PRs are merged to main. No stacked branches and no guessed interfaces.
 
@@ -66,7 +66,7 @@ Rules that always apply: no force-push to main, no local merges. I'll ask before
 ```python
 @dataclass(frozen=True, slots=True)
 class TemplateInfo:
-    id: int; template: str; count: int; first_seen: float; last_seen: float
+    id: str; template: str; count: int; first_seen: float; last_seen: float
     sample: str            # most recent (already-redacted) message
     rarity: float          # count / total messages seen by the miner (0..1)
 
@@ -74,13 +74,13 @@ class TemplateMiner:
     def __init__(self, clock: Clock, *, warmup_seconds: int = 300, rarity_threshold: float = 0.001,
                  novelty_ttl_s: int = 300, max_clusters: int = 1000, max_window_s: int = 300,
                  sim_th: float = 0.4, depth: int = 4) -> None
-    def add_message(self, message: str, *, service: str = "_global", ts: float | None = None) -> int
-    def get_template(self, template_id: int) -> TemplateInfo           # KeyError if unknown/evicted
+    def add_message(self, message: str, *, service: str = "_global", ts: float | None = None) -> str
+    def get_template(self, template_id: str) -> TemplateInfo           # KeyError if unknown/evicted
     def get_top_templates(self, n: int, *, service: str | None = None,
                           window_s: int | None = None) -> list[TemplateInfo]
-    def is_new(self, template_id: int, now: float | None = None) -> bool
-    def count_in_window(self, template_id: int, window_s: int, *, service: str | None = None) -> int
-    def new_templates_in_window(self, window_s: int, *, service: str | None = None) -> dict[int, int]
+    def is_new(self, template_id: str, now: float | None = None) -> bool
+    def count_in_window(self, template_id: str, window_s: int, *, service: str | None = None) -> int
+    def new_templates_in_window(self, window_s: int, *, service: str | None = None) -> dict[str, int]
     def tick(self) -> None                                              # evict old buckets on clock
     @property
     def total_messages(self) -> int

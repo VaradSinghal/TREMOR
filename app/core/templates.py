@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 
 STATE_VERSION = 1
 GLOBAL_SERVICE = "_global"
+TEMPLATE_ID_PREFIX = "T"
 
 # Order matters: the most specific patterns run first so that e.g. the digits
 # inside a UUID or an IP are not masked as <NUM> before the whole token is.
@@ -44,6 +45,17 @@ _MASKS: tuple[tuple[str, str], ...] = (
 )
 
 
+def _template_id(cluster_id: int) -> str:
+    """Public template id for a drain3 cluster id, e.g. ``12 -> "T12"``."""
+    return f"{TEMPLATE_ID_PREFIX}{cluster_id}"
+
+
+def _cluster_id(template_id: str) -> int:
+    """Inverse of ``_template_id``; -1 for strings that are not template ids."""
+    digits = template_id.removeprefix(TEMPLATE_ID_PREFIX)
+    return int(digits) if digits.isdigit() else -1
+
+
 @dataclass(frozen=True, slots=True)
 class TemplateInfo:
     """Snapshot of one mined template.
@@ -53,7 +65,7 @@ class TemplateInfo:
     ``rarity`` is always global: cumulative count / all messages seen.
     """
 
-    id: int
+    id: str
     template: str
     count: int
     first_seen: float
@@ -74,7 +86,7 @@ class _Stats:
 @dataclass(slots=True)
 class _Bucket:
     second: int
-    counts: Counter[int]
+    counts: Counter[str]
 
 
 class _MemoryPersistence:
@@ -150,8 +162,8 @@ class TemplateMiner:
         self._config = _build_config(sim_th, depth, max_clusters)
         self._drain = _Drain3Miner(persistence_handler=None, config=self._config)
 
-        self._stats: dict[int, _Stats] = {}
-        self._service_counts: dict[str, Counter[int]] = {}
+        self._stats: dict[str, _Stats] = {}
+        self._service_counts: dict[str, Counter[str]] = {}
         self._windows: dict[str, deque[_Bucket]] = {}
         self._total = 0
         self._warmup_end: float | None = None
@@ -161,8 +173,13 @@ class TemplateMiner:
 
     def add_message(
         self, message: str, *, service: str = GLOBAL_SERVICE, ts: float | None = None
-    ) -> int:
+    ) -> str:
         """Mine one (already redacted) message and return its template id.
+
+        The id (e.g. ``"T12"``) is the same for every message of a pattern and
+        stable for the life of the miner, including across ``persist``/``restore``.
+        It can only change if the pattern is evicted by the ``max_clusters`` cap
+        and later reappears.
 
         Args:
             message: Log message body, after PII redaction.
@@ -175,7 +192,7 @@ class TemplateMiner:
         self._advance(int(event_ts))
 
         result = self._drain.add_log_message(message)
-        template_id = int(result["cluster_id"])
+        template_id = _template_id(int(result["cluster_id"]))
 
         stats = self._stats.get(template_id)
         if stats is None:
@@ -211,7 +228,7 @@ class TemplateMiner:
         """Number of messages mined so far."""
         return self._total
 
-    def get_template(self, template_id: int) -> TemplateInfo:
+    def get_template(self, template_id: str) -> TemplateInfo:
         """Return the current snapshot of a template.
 
         Raises:
@@ -235,11 +252,11 @@ class TemplateMiner:
             counts = Counter({tid: s.count for tid, s in self._stats.items()})
         ranked = sorted(
             ((tid, c) for tid, c in counts.items() if c > 0 and tid in self._stats),
-            key=lambda item: (-item[1], item[0]),
+            key=lambda item: (-item[1], _cluster_id(item[0])),
         )
         return [self._info(tid, c) for tid, c in ranked[:n]]
 
-    def is_new(self, template_id: int, now: float | None = None) -> bool:
+    def is_new(self, template_id: str, now: float | None = None) -> bool:
         """Whether a template is currently considered new.
 
         New means it became novel (first seen after warm-up, or reappeared after
@@ -253,21 +270,25 @@ class TemplateMiner:
         return at - stats.novel_at <= self._novelty_ttl_s
 
     def count_in_window(
-        self, template_id: int, window_s: int, *, service: str | None = None
+        self, template_id: str, window_s: int, *, service: str | None = None
     ) -> int:
         """How many times a template appeared in the last ``window_s`` seconds."""
         return self._window_counts(window_s, service).get(template_id, 0)
 
     def new_templates_in_window(
         self, window_s: int, *, service: str | None = None
-    ) -> dict[int, int]:
+    ) -> dict[str, int]:
         """Counts over the last ``window_s`` seconds, for templates that are new now.
 
         Returns ``{template_id: count}``; intended for the new-pattern detector.
         """
         now = self._now()
         counts = self._window_counts(window_s, service)
-        return {tid: c for tid, c in sorted(counts.items()) if c > 0 and self.is_new(tid, now)}
+        return {
+            tid: counts[tid]
+            for tid in sorted(counts, key=_cluster_id)
+            if counts[tid] > 0 and self.is_new(tid, now)
+        }
 
     # ── Persistence ───────────────────────────────────────────────────
 
@@ -312,7 +333,7 @@ class TemplateMiner:
         if not currently_new and prior_rarity < self._rarity_threshold:
             stats.novel_at = event_ts
 
-    def _count_in_bucket(self, service: str, second: int, template_id: int) -> None:
+    def _count_in_bucket(self, service: str, second: int, template_id: str) -> None:
         buckets = self._windows.setdefault(service, deque())
         if second <= self._current_s - self._max_window_s:
             return  # too old to be inside any supported window
@@ -329,12 +350,12 @@ class TemplateMiner:
                 return
         buckets.appendleft(_Bucket(second, Counter({template_id: 1})))
 
-    def _window_counts(self, window_s: int, service: str | None) -> Counter[int]:
+    def _window_counts(self, window_s: int, service: str | None) -> Counter[str]:
         if window_s > self._max_window_s:
             raise ValueError(f"window_s={window_s} exceeds max_window_s={self._max_window_s}")
         cutoff = int(self._now()) - window_s
         services = [service] if service is not None else sorted(self._windows)
-        total: Counter[int] = Counter()
+        total: Counter[str] = Counter()
         for svc in services:
             for bucket in reversed(self._windows.get(svc, ())):
                 if bucket.second <= cutoff:
@@ -343,15 +364,15 @@ class TemplateMiner:
         return total
 
     def _prune_evicted(self) -> None:
-        live = {int(k) for k in self._drain.drain.id_to_cluster}
+        live = {_template_id(int(k)) for k in self._drain.drain.id_to_cluster}
         for tid in [t for t in self._stats if t not in live]:
             del self._stats[tid]
             for counts in self._service_counts.values():
                 counts.pop(tid, None)
 
-    def _info(self, template_id: int, count: int) -> TemplateInfo:
+    def _info(self, template_id: str, count: int) -> TemplateInfo:
         stats = self._stats[template_id]
-        cluster = self._drain.drain.id_to_cluster.get(template_id)
+        cluster = self._drain.drain.id_to_cluster.get(_cluster_id(template_id))
         template = str(cluster.get_template()) if cluster is not None else stats.sample
         return TemplateInfo(
             id=template_id,
@@ -386,10 +407,10 @@ class TemplateMiner:
                     "sample": s.sample,
                     "novel_at": s.novel_at,
                 }
-                for tid, s in sorted(self._stats.items())
+                for tid, s in sorted(self._stats.items(), key=lambda kv: _cluster_id(kv[0]))
             ],
             "service_counts": {
-                svc: {str(tid): c for tid, c in sorted(counts.items())}
+                svc: {tid: counts[tid] for tid in sorted(counts, key=_cluster_id)}
                 for svc, counts in sorted(self._service_counts.items())
             },
         }
@@ -407,7 +428,7 @@ class TemplateMiner:
         self._warmup_end = None if warmup_end is None else float(warmup_end)
         self._current_s = int(data["current_s"])
         self._stats = {
-            int(t["id"]): _Stats(
+            str(t["id"]): _Stats(
                 count=int(t["count"]),
                 first_seen=float(t["first_seen"]),
                 last_seen=float(t["last_seen"]),
@@ -417,7 +438,7 @@ class TemplateMiner:
             for t in data["templates"]
         }
         self._service_counts = {
-            str(svc): Counter({int(tid): int(c) for tid, c in counts.items()})
+            str(svc): Counter({str(tid): int(c) for tid, c in counts.items()})
             for svc, counts in data["service_counts"].items()
         }
         self._windows = {}
