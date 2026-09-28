@@ -4,7 +4,7 @@ TREMOR — Parser tests.
 
 from __future__ import annotations
 
-from app.ingest.parser import LogEvent, normalize_level, parse_line
+from app.ingest.parser import normalize_level, parse_line
 
 
 def test_normalize_level() -> None:
