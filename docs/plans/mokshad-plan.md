@@ -271,8 +271,9 @@ Planned shape, to be finalized against Kostubh's real interfaces once they exist
 - **Pipeline replay:** FakeClock, events driven by virtual second (ticks continue through empty seconds so silence can be observed). The flow is:
   1. `LogGenerator.iter_lines()`
   2. `parse_line` (malformed lines counted)
-  3. `WindowEngine.add_event` and `TemplateMiner.add_message`
-  4. per second: `tick()`, then `detector_fn`, then the alert stage
+  3. `TemplateMiner.add_message` gives `tid`, then `miner.is_new(tid, now=t)`
+  4. TREMOR adapter: `engine.observe(event, arrival=t, template_id, is_new)`, and `engine.tick(now=t)` every virtual second. Detection reads no clock (agreed with Kostubh on 2026-09-28; exact API in `docs/DETECTION_API.md`).
+  5. Baseline adapters: `WindowEngine.add_event` / `tick()`, then `detector_fn`, then the eval dedup stage
 - **One `detector_fn` interface** with three adapters:
   - TREMOR: Kostubh's modules. It raises `NotImplementedError` if they're not merged, and TREMOR is then reported as n/a while the baselines still run.
   - static 5%: 60 s error rate > 5% with min events.
