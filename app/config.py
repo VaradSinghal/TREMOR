@@ -21,23 +21,38 @@ class Settings(BaseSettings):
 
     # ── Windows & Baseline ───────────────────────────────────────────
     windows_s: str = "10,60,300"
-    warmup_seconds: int = 300
-    min_events: int = 20
+    warmup_seconds: int = 300  # not used by detection; warm-up counts ticks (warmup_ticks)
+    min_events: int = 20  # min lines (or latency samples) in the detection window per tick
+
+    # ── Detection baseline (EWMA) ────────────────────────────────────
+    detection_window_s: int = 30  # arrival-time window for error rate and latency p95
+    warmup_ticks: int = 30  # ticks with n >= min_events used to seed the baseline
+    alpha: float = 0.01  # EWMA smoothing factor
+    sigma_min: float = 0.01  # absolute floor on sigma_eff for error rate
+    baseline_update_max_z: float = 2.0  # baseline only learns from ticks with z below this
 
     # ── Severity Thresholds ──────────────────────────────────────────
-    z_info: float = 2.0
-    z_warn: float = 3.0
-    z_high: float = 4.0
-    z_crit: float = 6.0
+    z_info: float = 3.0  # was 2.0
+    z_warn: float = 5.0  # was 3.0
+    z_high: float = 8.0  # was 4.0
+    z_crit: float = 6.0  # not used by detection: CRITICAL is the rate_ceiling rule
     rate_ceiling: float = 0.5
-    clear_z: float = 1.5
-    clear_windows: int = 3
+    clear_z: float = 2.0  # was 1.5
+    clear_windows: int = 10  # was 3; now counts consecutive 1 s ticks
 
     # ── Silence ──────────────────────────────────────────────────────
-    silence_seconds: int = 30
+    silence_seconds: int = 10  # was 30
+
+    # ── Latency ──────────────────────────────────────────────────────
+    latency_percentile: float = 0.95
+    latency_floor_frac: float = 0.1  # sigma_eff >= this fraction of the baseline p95
+    latency_sigma_min_ms: float = 1.0  # keeps z finite when baseline p95 is 0 ms
+
+    # ── New pattern ──────────────────────────────────────────────────
+    new_pattern_resolve_s: int = 60  # resolve after this long without the template
 
     # ── Alerts ───────────────────────────────────────────────────────
-    alert_cooldown_s: int = 300
+    alert_cooldown_s: int = 60  # was 300
 
     # ── AWS ──────────────────────────────────────────────────────────
     sns_topic_arn: str = ""
