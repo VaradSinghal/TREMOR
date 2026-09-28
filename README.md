@@ -117,9 +117,12 @@ All settings are env-driven with sane defaults. See [`.env.example`](.env.exampl
 |----------|---------|-------------|
 | `LOG_PATHS` | `./sample/app.log` | Comma-separated files to tail |
 | `WINDOWS_S` | `10,60,300` | Window sizes in seconds |
-| `WARMUP_SECONDS` | `300` | No alerts before this |
-| `Z_WARN / Z_HIGH / Z_CRIT` | `3 / 4 / 6` | Severity z-score thresholds |
+| `WARMUP_TICKS` | `30` | Ticks (with >= `MIN_EVENTS` lines) that seed the baseline; no z-based alerts before |
+| `Z_INFO / Z_WARN / Z_HIGH` | `3 / 5 / 8` | Severity z-score thresholds |
 | `RATE_CEILING` | `0.5` | Hard critical ceiling |
+| `CLEAR_Z / CLEAR_WINDOWS` | `2.0 / 10` | Resolve after 10 consecutive 1 s ticks below z 2 |
+| `SILENCE_SECONDS` | `10` | No lines for this long opens a silence incident |
+| `ALERT_COOLDOWN_S` | `60` | Re-open within this reuses the incident id |
 | `DRY_RUN` | `false` | Skip real AWS calls |
 | `DEMO_MODE` | `false` | Enable scenario injection |
 | `DATABASE_URL` | `sqlite+aiosqlite:///./tremor.db` | Database connection |
