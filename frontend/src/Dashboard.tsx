@@ -1,8 +1,14 @@
-// useCallback is imported here so uncommenting the polling/WS stubs below
-// requires no further import changes.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import "./App.css";
 import { useWebSocket } from "./useWebSocket";
+import { 
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
+} from 'recharts';
+import { 
+  Activity, AlertTriangle, ShieldCheck, Zap, Server, Database, Bell, X, CheckCircle2,
+  FileText, Cpu, Search, BrainCircuit, Send, ArrowRight
+} from "lucide-react";
+
 type Severity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 
 type Alert = {
@@ -19,11 +25,25 @@ type Alert = {
 };
 
 type Point = {
+  time: string;
   value: number;
   baseline: number;
 };
 
 const MAX_POINTS = 60;
+
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="custom-tooltip">
+        <p className="tooltip-label">{label}</p>
+        <p className="tooltip-val current">Current: {payload[0]?.value?.toFixed(2) ?? 0}%</p>
+        <p className="tooltip-val baseline">Baseline: {payload[1]?.value?.toFixed(2) ?? 0}%</p>
+      </div>
+    );
+  }
+  return null;
+};
 
 function Dashboard() {
   const [history, setHistory] = useState<Point[]>([]);
@@ -32,12 +52,10 @@ function Dashboard() {
   const [incidentActive, setIncidentActive] = useState(false);
   const [currentValue, setCurrentValue] = useState(0);
   const [baseline, setBaseline] = useState(0);
-  const [zScore, setZScore] = useState(0);
+  const [, setZScore] = useState(0);
+  const [linesProcessed, setLinesProcessed] = useState(0);
   const [severity, setSeverity] = useState<Severity>("LOW");
 
-  // Keep the drawer in sync: if the alert displayed in the drawer is updated
-  // elsewhere (ack/silence from another session, or a status push over WS),
-  // reflect that change without requiring the user to close and reopen.
   useEffect(() => {
     if (!selectedAlert) return;
     const live = alerts.find((a) => a.id === selectedAlert.id);
@@ -46,9 +64,6 @@ function Dashboard() {
     }
   }, [alerts, selectedAlert]);
 
-  // ---------------------------------------------------------------------------
-  // Live WebSocket Integration
-  // ---------------------------------------------------------------------------
   const handleWSMessage = useCallback((message: any) => {
     if (message.type === "snapshot") {
       setAlerts(message.data.alerts || []);
@@ -75,12 +90,14 @@ function Dashboard() {
       setCurrentValue(tick.error_rate ?? 0);
       setBaseline(tick.baseline ?? 0);
       setZScore(tick.z ?? 0);
+      setLinesProcessed(tick.lines ?? 0);
       setSeverity((tick.severity as Severity) || "LOW");
 
       setHistory((prev) => {
          const val = tick.error_rate ?? 0;
          const base = tick.baseline ?? 0;
-         return [...prev.slice(-(MAX_POINTS - 1)), { value: val, baseline: base }];
+         const timeLabel = new Date(tick.ts * 1000).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second:'2-digit' });
+         return [...prev.slice(-(MAX_POINTS - 1)), { time: timeLabel, value: val, baseline: base }];
       });
     }
   }, []);
@@ -90,351 +107,309 @@ function Dashboard() {
     onError: (e) => console.warn("[TREMOR] WS error", e),
   });
 
-  const chart = useMemo(() => {
-    const width = 1000;
-    const height = 280;
-
-    const maxValue = Math.max(
-      35,
-      ...history.map((point) => point.value),
-      baseline * 2,
-    );
-
-    const points = history.map((point, index) => {
-      const x = (index / (MAX_POINTS - 1)) * width;
-      const y = height - (point.value / maxValue) * (height - 20);
-
-      return `${x},${y}`;
-    });
-
-    const baselineY =
-      height - (baseline / maxValue) * (height - 20);
-
-    return {
-      points: points.join(" "),
-      baselineY,
-    };
-  }, [history, baseline]);
-
   const acknowledgeAlert = () => {
     if (!selectedAlert) return;
-
-    const updated = {
-      ...selectedAlert,
-      status: "ACKED" as const,
-    };
-
+    const updated = { ...selectedAlert, status: "ACKED" as const };
     setSelectedAlert(updated);
-
-    setAlerts((previous) =>
-      previous.map((alert) =>
-        alert.id === updated.id ? updated : alert,
-      ),
-    );
+    setAlerts((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
   };
 
   const silenceAlert = () => {
     if (!selectedAlert) return;
-
-    const updated = {
-      ...selectedAlert,
-      status: "SILENCED" as const,
-    };
-
+    const updated = { ...selectedAlert, status: "SILENCED" as const };
     setSelectedAlert(updated);
-
-    setAlerts((previous) =>
-      previous.map((alert) =>
-        alert.id === updated.id ? updated : alert,
-      ),
-    );
+    setAlerts((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
   };
+
+  const isAnomaly = incidentActive;
 
   return (
     <div className="app">
+      <div className="glow-bg"></div>
+      
       <header className="topbar">
-        <div>
-          <div className="brand">TREMOR</div>
-          <div className="subtitle">
-            Real-Time Anomaly Detection
+        <div className="brand-container">
+          <div className="brand">
+            <Zap size={24} className="brand-icon" />
+            TREMOR
           </div>
         </div>
-
         <div className="system-status">
-          <span className="status-dot" />
-          SYSTEM ONLINE
+          <span className="status-dot pulse" />
+          WS LIVE
         </div>
       </header>
 
       <main className="dashboard">
-        {/* TOP METRICS */}
-        <section className="overview">
-          <div className="metric-card">
-            <span className="metric-label">ERROR RATE</span>
-
-            <strong>{currentValue.toFixed(1)}%</strong>
-
-            <span className="metric-change">
-              {isAnomaly
-                ? "↑ ANOMALOUS"
-                : "Within expected range"}
-            </span>
+        
+        {/* PIPELINE VISUALIZATION */}
+        <section className="pipeline-section animate-fade-in">
+          <div className="panel-header borderless">
+            <h2>Data Pipeline</h2>
+            <span>Real-time ingestion and detection flow</span>
           </div>
-
-          <div className="metric-card">
-            <span className="metric-label">BASELINE</span>
-
-            <strong>{baseline.toFixed(1)}%</strong>
-
-            <span className="metric-change">
-              EWMA · 60s window
-            </span>
-          </div>
-
-          <div className="metric-card">
-            <span className="metric-label">
-              ACTIVE INCIDENT
-            </span>
-
-            <strong className={`severity-${severity.toLowerCase()}`}>
-              {isAnomaly ? severity : "NONE"}
-            </strong>
-
-            <span className="metric-change">
-              {isAnomaly
-                ? alerts[0]?.incident_id ?? "Detecting..."
-                : "System normal"}
-            </span>
-          </div>
-        </section>
-
-        {/* CHART */}
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <h2>Error Rate</h2>
-
-              <span>
-                60-second sliding window · live
-              </span>
+          
+          <div className="pipeline-container">
+            <div className="pipeline-node active">
+              <div className="node-icon"><FileText size={20} /></div>
+              <div className="node-info">
+                <strong>Tailer</strong>
+                <span>{linesProcessed} msgs/s</span>
+              </div>
+            </div>
+            
+            <div className="pipeline-edge">
+              <div className="edge-line"><div className="moving-light"></div></div>
             </div>
 
-            <div className="legend">
-              <span className="legend-current" />
-              Current
-
-              <span className="legend-baseline" />
-              Baseline
-            </div>
-          </div>
-
-          <div className="chart-placeholder">
-            <svg
-              viewBox="0 0 1000 280"
-              preserveAspectRatio="none"
-              className="chart"
-            >
-              <polyline
-                points={chart.points}
-                fill="none"
-                stroke="#b57cff"
-                strokeWidth="3"
-                vectorEffect="non-scaling-stroke"
-              />
-
-              <line
-                x1="0"
-                x2="1000"
-                y1={chart.baselineY}
-                y2={chart.baselineY}
-                stroke="#55555f"
-                strokeWidth="1"
-                strokeDasharray="6 5"
-                vectorEffect="non-scaling-stroke"
-              />
-            </svg>
-
-            <div className="chart-label baseline-label">
-              BASELINE
+            <div className="pipeline-node active">
+              <div className="node-icon"><Cpu size={20} /></div>
+              <div className="node-info">
+                <strong>Parser</strong>
+                <span>Regex</span>
+              </div>
             </div>
 
-            <div className="chart-label live-label">
-              LIVE
-            </div>
-          </div>
-        </section>
-
-        {/* LIVE ALERTS */}
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <h2>Live Alerts</h2>
-
-              <span>
-                Real-time anomaly detections
-              </span>
+            <div className="pipeline-edge">
+              <div className="edge-line"><div className="moving-light"></div></div>
             </div>
 
-            <span className="alert-count">
-              {alerts.length} ALERT{alerts.length !== 1 ? "S" : ""}
-            </span>
-          </div>
+            <div className="pipeline-node active">
+              <div className="node-icon"><Search size={20} /></div>
+              <div className="node-info">
+                <strong>Miner</strong>
+                <span>Drain3</span>
+              </div>
+            </div>
 
-          <div className="alert-list">
-            {alerts.length === 0 ? (
-              <div className="empty-state">
-                <div className="empty-icon">✓</div>
+            <div className="pipeline-edge">
+              <div className="edge-line"><div className="moving-light"></div></div>
+            </div>
 
-                <strong>No anomalies detected</strong>
-
-                <span>
-                  Monitoring the incoming log stream...
+            <div className={`pipeline-node ${isAnomaly ? 'anomaly-pulse' : 'active'}`}>
+              <div className="node-icon"><BrainCircuit size={20} /></div>
+              <div className="node-info">
+                <strong>Engine</strong>
+                <span className={isAnomaly ? "text-critical" : "text-safe"}>
+                  {isAnomaly ? "ANOMALY" : "Normal"}
                 </span>
               </div>
-            ) : (
-              alerts.map((alert) => (
-                <button
-                  className="alert-row"
-                  key={alert.id}
-                  onClick={() => setSelectedAlert(alert)}
-                >
-                  <span
-                    className={`severity severity-${alert.severity.toLowerCase()}`}
-                  >
-                    {alert.severity}
-                  </span>
+            </div>
 
-                  <div className="alert-info">
-                    <strong>
-                      {alert.signal_type}
-                    </strong>
+            <div className="pipeline-edge">
+              <div className="edge-line"><div className="moving-light"></div></div>
+            </div>
 
-                    <span>
-                      {alert.reason}
-                    </span>
-                  </div>
-
-                  <div className="alert-meta">
-                    <span>{alert.status}</span>
-                    <time>{alert.created_at}</time>
-                  </div>
-                </button>
-              ))
-            )}
+            <div className="pipeline-node active">
+              <div className="node-icon"><Send size={20} /></div>
+              <div className="node-info">
+                <strong>Sinks</strong>
+                <span>WS/CloudWatch</span>
+              </div>
+            </div>
           </div>
         </section>
+
+        {/* METRICS */}
+        <section className="overview animate-slide-up">
+          <div className="metric-card">
+            <div className="metric-header">
+              <span className="metric-label">LIVE ERROR RATE</span>
+              <Activity className="metric-icon" size={16} />
+            </div>
+            <strong className="metric-value">{currentValue.toFixed(2)}<span className="unit">%</span></strong>
+            <div className="metric-change">
+              {isAnomaly ? (
+                <span className="status-badge critical"><AlertTriangle size={12} /> HIGH ANOMALY</span>
+              ) : (
+                <span className="status-badge safe"><ShieldCheck size={12} /> Normal bounds</span>
+              )}
+            </div>
+          </div>
+
+          <div className="metric-card">
+            <div className="metric-header">
+              <span className="metric-label">DYNAMIC BASELINE</span>
+              <Database className="metric-icon" size={16} />
+            </div>
+            <strong className="metric-value">{baseline.toFixed(2)}<span className="unit">%</span></strong>
+            <div className="metric-change">
+              <span className="status-badge neutral">EWMA Learning</span>
+            </div>
+          </div>
+
+          <div className="metric-card">
+            <div className="metric-header">
+              <span className="metric-label">INGESTION THROUGHPUT</span>
+              <Server className="metric-icon" size={16} />
+            </div>
+            <strong className="metric-value">{linesProcessed}<span className="unit">/s</span></strong>
+            <div className="metric-change">
+              <span className="status-badge neutral">Logs processed</span>
+            </div>
+          </div>
+
+          <div className="metric-card">
+            <div className="metric-header">
+              <span className="metric-label">INCIDENT STATE</span>
+              <Zap className="metric-icon" size={16} />
+            </div>
+            <strong className={`metric-value text-${severity.toLowerCase()}`}>
+              {isAnomaly ? severity : "HEALTHY"}
+            </strong>
+            <div className="metric-change">
+              <span className="status-badge plain">{isAnomaly ? alerts[0]?.incident_id : "No active incidents"}</span>
+            </div>
+          </div>
+        </section>
+
+        <div className="grid-layout animate-slide-up-delayed">
+          {/* CHART */}
+          <section className="panel chart-panel">
+            <div className="panel-header">
+              <div>
+                <h2>Anomaly Detection Chart</h2>
+                <span>Real-time deviation from baseline</span>
+              </div>
+            </div>
+            <div className="chart-container">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={history} margin={{ top: 10, right: 0, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#B05130" stopOpacity={0.25}/>
+                      <stop offset="95%" stopColor="#B05130" stopOpacity={0}/>
+                    </linearGradient>
+                    <linearGradient id="colorValueAnomaly" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#9A3E25" stopOpacity={0.4}/>
+                      <stop offset="95%" stopColor="#9A3E25" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" vertical={false} />
+                  <XAxis dataKey="time" stroke="rgba(0,0,0,0.38)" tick={{fontSize: 11, fill: 'rgba(0,0,0,0.54)'}} tickLine={false} axisLine={false} minTickGap={30} />
+                  <YAxis stroke="rgba(0,0,0,0.38)" tick={{fontSize: 11, fill: 'rgba(0,0,0,0.54)'}} tickLine={false} axisLine={false} />
+                  <Tooltip content={<CustomTooltip />} cursor={{ stroke: 'rgba(0,0,0,0.2)', strokeWidth: 1, strokeDasharray: '4 4' }} />
+                  <Area type="monotone" dataKey="baseline" stroke="rgba(0,0,0,0.38)" strokeDasharray="5 5" fill="none" strokeWidth={2} />
+                  <Area 
+                    type="monotone" 
+                    dataKey="value" 
+                    stroke={isAnomaly ? "#9A3E25" : "#B05130"} 
+                    fillOpacity={1} 
+                    fill={isAnomaly ? "url(#colorValueAnomaly)" : "url(#colorValue)"} 
+                    strokeWidth={2} 
+                    activeDot={{ r: 6, fill: isAnomaly ? "#9A3E25" : "#B05130", stroke: '#FFF', strokeWidth: 2 }} 
+                    animationDuration={300}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
+
+          {/* ALERTS LIST */}
+          <section className="panel alerts-panel">
+            <div className="panel-header">
+              <div>
+                <h2>Incident Feed</h2>
+                <span>Recent anomalies</span>
+              </div>
+              {alerts.length > 0 && (
+                <span className="alert-count pulse-soft">
+                  {alerts.length} ALERT{alerts.length !== 1 ? "S" : ""}
+                </span>
+              )}
+            </div>
+
+            <div className="alert-list">
+              {alerts.length === 0 ? (
+                <div className="empty-state">
+                  <div className="empty-icon-wrapper">
+                    <CheckCircle2 size={32} />
+                  </div>
+                  <strong>System is stable</strong>
+                  <span>No anomalies detected.</span>
+                </div>
+              ) : (
+                alerts.map((alert) => (
+                  <button
+                    className={`alert-row severity-${alert.severity.toLowerCase()}`}
+                    key={alert.id}
+                    onClick={() => setSelectedAlert(alert)}
+                  >
+                    <div className="alert-indicator"></div>
+                    <div className="alert-content">
+                      <div className="alert-header">
+                        <span className={`severity-tag severity-${alert.severity.toLowerCase()}`}>
+                          {alert.severity}
+                        </span>
+                        <span className="alert-time">{alert.created_at || new Date().toLocaleTimeString()}</span>
+                      </div>
+                      <strong>{alert.signal_type}</strong>
+                      <span className="alert-reason">{alert.reason}</span>
+                    </div>
+                    <ArrowRight className="alert-arrow" size={16} />
+                  </button>
+                ))
+              )}
+            </div>
+          </section>
+        </div>
       </main>
 
       {/* ALERT DRAWER */}
       {selectedAlert && (
-        <div
-          className="drawer-backdrop"
-          onClick={() => setSelectedAlert(null)}
-        >
-          <aside
-            className="alert-drawer"
-            onClick={(event) => event.stopPropagation()}
-          >
+        <div className="drawer-backdrop animate-fade-in" onClick={() => setSelectedAlert(null)}>
+          <aside className="alert-drawer animate-slide-left" onClick={(e) => e.stopPropagation()}>
             <div className="drawer-header">
               <div>
-                <span className="metric-label">
-                  INCIDENT
-                </span>
-
-                <h2>
-                  {selectedAlert.incident_id}
-                </h2>
+                <span className="metric-label">INCIDENT</span>
+                <h2>{selectedAlert.incident_id || "INC-UNKNOWN"}</h2>
               </div>
-
-              <button
-                className="close-button"
-                onClick={() => setSelectedAlert(null)}
-              >
-                ×
+              <button className="close-button" onClick={() => setSelectedAlert(null)}>
+                <X size={20} />
               </button>
             </div>
 
-            <div
-              className={`drawer-severity severity-${selectedAlert.severity.toLowerCase()}`}
-            >
-              {selectedAlert.severity}
+            <div className={`drawer-severity bg-${selectedAlert.severity.toLowerCase()}`}>
+              {selectedAlert.severity} SEVERITY
             </div>
 
             <div className="drawer-section">
-              <span className="metric-label">
-                SIGNAL
-              </span>
-
-              <strong>
-                {selectedAlert.signal_type}
-              </strong>
+              <span className="metric-label">SIGNAL SOURCE</span>
+              <strong>{selectedAlert.signal_type}</strong>
             </div>
 
             <div className="drawer-grid">
-              <div>
-                <span className="metric-label">
-                  CURRENT
-                </span>
-
-                <strong>
-                  {selectedAlert.value}%
-                </strong>
+              <div className="grid-box">
+                <span className="metric-label">CURRENT</span>
+                <strong>{selectedAlert.value}%</strong>
               </div>
-
-              <div>
-                <span className="metric-label">
-                  BASELINE
-                </span>
-
-                <strong>
-                  {selectedAlert.baseline}%
-                </strong>
+              <div className="grid-box">
+                <span className="metric-label">BASELINE</span>
+                <strong>{selectedAlert.baseline}%</strong>
               </div>
-
-              <div>
-                <span className="metric-label">
-                  Z-SCORE
-                </span>
-
-                <strong>
-                  {selectedAlert.z_score}
-                </strong>
+              <div className="grid-box">
+                <span className="metric-label">Z-SCORE</span>
+                <strong>{selectedAlert.z_score}</strong>
               </div>
-
-              <div>
-                <span className="metric-label">
-                  STATUS
-                </span>
-
-                <strong>
-                  {selectedAlert.status}
-                </strong>
+              <div className="grid-box">
+                <span className="metric-label">STATUS</span>
+                <strong className={`status-${selectedAlert.status.toLowerCase()}`}>{selectedAlert.status}</strong>
               </div>
             </div>
 
             <div className="drawer-section">
-              <span className="metric-label">
-                EXPLANATION
-              </span>
-
-              <p>
-                {selectedAlert.reason}
-              </p>
+              <span className="metric-label">EXPLANATION</span>
+              <div className="explanation-box">
+                <p>{selectedAlert.reason}</p>
+              </div>
             </div>
 
             <div className="drawer-actions">
-              <button
-                className="action-button"
-                onClick={acknowledgeAlert}
-              >
-                ACKNOWLEDGE
+              <button className="btn-primary" onClick={acknowledgeAlert}>
+                <CheckCircle2 size={16} /> Acknowledge
               </button>
-
-              <button
-                className="action-button secondary"
-                onClick={silenceAlert}
-              >
-                SILENCE
+              <button className="btn-secondary" onClick={silenceAlert}>
+                <Bell size={16} /> Silence
               </button>
             </div>
           </aside>
