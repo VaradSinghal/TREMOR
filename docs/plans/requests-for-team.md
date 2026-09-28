@@ -9,12 +9,26 @@ Changes Mokshad needs in files owned by others. Mokshad does not edit these file
 ### Blocking: eval harness (Phase 6, step 4)
 
 `eval/run.py` replays scenarios through parser → window → baseline → detectors → alert manager.
-It cannot be built until these interfaces exist, even as final signatures with stub bodies:
 
-1. **Signal type.** This is what a detector returns: fields such as service, signal_type, value, z, window_s and ts.
-2. **Detector call signature.** How a detector is constructed and invoked each tick, and what it takes (WindowEngine views, BaselineStore, TemplateMiner, clock?).
-3. **`BaselineStore`.** Final signatures for `update` / `get` / `freeze` / `unfreeze` / `is_warm`.
-4. **`AlertManager`.** Final signatures for `process_signal` / `resolve` / `get_active`.
+**Still open:** the full signatures (Signal type, engine, `BaselineStore`, alert lifecycle). Kostubh is writing them to `docs/DETECTION_API.md`. The must-haves (baseline, error rate, silence, alert lifecycle, engine) land on main as one PR. New-pattern and latency follow in a second PR. Eval starts once the first PR is merged.
+
+### Agreed with Kostubh (recorded 2026-09-28)
+
+1. **No clock in detection.** Time is always an argument: `engine.observe(event, arrival, ...)` and `engine.tick(now)`. For eval, pass the FakeClock time as both `arrival` and `now`, which makes replays fully deterministic.
+2. **One shared `TemplateMiner` per process.** The pipeline calls `add_message` once per event and passes `template_id` plus the `is_new` result into `engine.observe()`. Detection never calls the miner.
+3. **The miner is the only definition of "new".** The new-pattern detector keeps no seen-set of its own. It only adds alert policy on top:
+   - novelty is ignored during a 30-tick warm-up
+   - WARNING if the event level is ERROR, INFO otherwise
+   - one incident per template id, resolved after 60 s without that template
+
+   `new_templates_in_window()` stays Mokshad's, for eval and the UI.
+4. **Signal names are final:** `ERROR_RATE`, `SILENCE`, `NEW_PATTERN`, `LATENCY` (the `SignalType` enum in `alerts.py`).
+5. **Pipeline call pattern (Mokshad's side):**
+   ```python
+   tid = miner.add_message(event.message, service=event.service, ts=event.ts)
+   engine.observe(event, arrival, template_id=tid, is_new=miner.is_new(tid, now=arrival))
+   ```
+   Passing `now=` explicitly keeps `is_new` deterministic. The exact `observe()` argument names will follow `docs/DETECTION_API.md`.
 
 ### Delivered: TemplateMiner API (`app/core/templates.py`)
 
