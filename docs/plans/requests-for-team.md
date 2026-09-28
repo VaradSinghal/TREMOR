@@ -12,16 +12,25 @@ Changes Mokshad needs in files owned by others. Mokshad does not edit these file
 
 **Signatures received** (`docs/DETECTION_API.md`, 2026-09-28): `DetectionEngine.observe(event, arrival, template_id, is_new_template)` / `tick(now) -> TickResult`, `Signal`, `AlertManager.process`, and the `Detector` protocol. Eval starts once Kostubh's first PR (engine, baseline, error rate, silence, alerts) and my templates and simulator PRs are merged to main.
 
-### Open questions on DETECTION_API.md (from Mokshad)
+### DETECTION_API.md questions: answered from main @ ba29522 (2026-09-28)
 
-1. **`is_new` meaning conflicts with what we agreed.** `TemplateMinerLike.is_new` and `Observation.is_new_template` are documented as "true iff the most recent `add_message()` call created this template". We agreed my miner is the only definition of "new", and it is richer than that:
-   - true when the template was first seen after the miner's warm-up, or when a rare template surges (at least 3 times in 60 s)
-   - stays true for 300 s
+1. **`is_new` meaning: still OPEN.** `detectors/base.py` still documents `is_new` as "the miner created this template on this line", and `NewPatternDetector` is still a stub. **Kostubh:** when you write it, use the shared miner's `is_new` as-is: first seen after warm-up, or a rare template surging (3+ in 60 s), held for 300 s. Please update both docstrings to match.
+2. **Per-service: ANSWERED.** `DetectionEngine.observe()` does not filter by `event.service`; `service` only labels alerts and baselines. The pipeline must route each event to its own service's engine. Eval does this. A single `"*"` engine misses a single service going silent, and a test proves it (`test_tremor_whole_stream_misses_single_service_silence`). **`app/main.py` owner:** create one engine per service.
+3. **Warm-up: ANSWERED.** `warmup_ticks = 30` ticks with n ≥ 20, so about 30–35 s, well inside my 360 s clean prefix. `warmup_seconds` is unused by detection.
+4. **`TemplateHint.template_id` is `str`: ANSWERED** (`alerts.py:56`).
 
-   Your detector dedups per template id, so a flag that stays true for a while is harmless. Please reword both docstrings to "true while the shared TemplateMiner considers the template new", or tell me if you really need "created on this line" instead.
-2. **Per-service or whole-stream?** `DetectionEngine(service="*")` watches the whole stream, but eval labels (and real incidents) are per service. For example, payment-gateway going quiet while auth and ledger keep logging never trips a whole-stream `SilenceDetector`. Does `DetectionEngine(service="payment-gateway")` only consider that service's events, or should the pipeline route each event to a per-service engine? Eval will run one engine per service unless you say otherwise.
-3. **Warm-up length in ticks.** My scenarios keep traffic clean for 360 s before any anomaly. Please confirm that the default `Settings` warm-up is 360 ticks or fewer.
-4. **`TemplateHint.template_id`:** please confirm it is now `str`.
+### Finding from eval: ERROR_RATE baseline under-learns on low-volume services (Kostubh)
+
+In `docs/EVAL.md` (seed 42), all 12 TREMOR false positives are **INFO**-level ERROR_RATE alerts (z ≈ 3.0–3.7) on low-volume services: 6 on noisy_normal's auth-service (~2 lines/s), the rest on ledger (~5 lines/s).
+
+The learned baseline is too low. auth-service really runs at 3% errors in noisy_normal, but `mu` is 0.8–2.2%. Thirty warm-up ticks of *overlapping* 30 s windows are roughly one minute of data, and gated updates can't pull `mu` back up afterwards.
+
+At WARNING+ TREMOR has **0 false positives** (7/10 scenarios fully correct), so nothing pages, but INFO is noisy. Options:
+- a longer `warmup_ticks` (e.g. 300)
+- sampling non-overlapping windows during warm-up
+- a gentler update gate
+
+`python -m eval.run --seed 42` will show the effect.
 
 ### Agreed with Kostubh (recorded 2026-09-28)
 
@@ -84,10 +93,10 @@ I fixed all ruff and black issues in my own files (`app/ingest/*`, `app/core/win
 | `app/sinks/base.py` | 14 | reformat | Varad |
 | `app/sinks/dryrun.py` | 2 | reformat | Varad |
 | `tests/test_sinks.py` | 6 | reformat | Varad |
-| `app/core/alerts.py` | 3 (E402) | reformat | Kostubh |
 | `app/api/routes.py` | — | reformat | Sara |
 | `app/main.py` | 1 | reformat | ? |
-| `app/config.py` | 1 | reformat | ? |
+
+(`app/core/alerts.py` and `app/config.py` were fixed on main in ba29522.)
 
 Most of these clear with `ruff check --fix <file> && black <file>`.
 
