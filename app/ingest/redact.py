@@ -36,7 +36,7 @@ def _luhn_checksum(digits: str) -> bool:
     digits = "".join(filter(str.isdigit, digits))
     if not digits:
         return False
-    
+
     total = 0
     reverse_digits = digits[::-1]
     for i, char in enumerate(reverse_digits):
@@ -46,7 +46,7 @@ def _luhn_checksum(digits: str) -> bool:
             if d > 9:
                 d -= 9
         total += d
-    
+
     return total % 10 == 0
 
 
@@ -87,4 +87,3 @@ def redact(text: str) -> str:
     text = CC_RE.sub(cc_repl, text)
 
     return text
-
