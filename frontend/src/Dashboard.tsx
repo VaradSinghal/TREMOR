@@ -2,8 +2,7 @@
 // requires no further import changes.
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
-// import { useWebSocket } from "./useWebSocket";
-
+import { useWebSocket } from "./useWebSocket";
 type Severity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 
 type Alert = {
@@ -27,110 +26,14 @@ type Point = {
 const MAX_POINTS = 60;
 
 function Dashboard() {
-  const [history, setHistory] = useState<Point[]>(() =>
-    Array.from({ length: MAX_POINTS }, () => ({
-      value: 4 + Math.random() * 1.5,
-      baseline: 4.2,
-    })),
-  );
-
+  const [history, setHistory] = useState<Point[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
   const [incidentActive, setIncidentActive] = useState(false);
-
-  // tickRef avoids a stale-closure bug: if tick were state, the interval
-  // callback would always read the value captured at mount (i.e. 0) and the
-  // anomaly phase would never advance.
-  const tickRef = useRef(0);
-
-  // Simulated live log/error-rate stream.
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      tickRef.current += 1;
-
-      // Read the current tick synchronously — no stale closure.
-      const anomalyPhase = tickRef.current % 25;
-
-      setHistory((previous) => {
-        const previousValue = previous[previous.length - 1]?.value ?? 4.2;
-
-        let nextValue: number;
-
-        if (anomalyPhase >= 18 && anomalyPhase <= 23) {
-          // Simulated error spike.
-          nextValue = 15 + Math.random() * 18;
-        } else {
-          // Normal traffic with EWMA-style smoothing.
-          nextValue = Math.max(
-            1,
-            previousValue * 0.65 + (4 + Math.random() * 2) * 0.35,
-          );
-        }
-
-        return [
-          ...previous.slice(-(MAX_POINTS - 1)),
-          { value: nextValue, baseline: 4.2 },
-        ];
-      });
-    }, 1000);
-
-    return () => window.clearInterval(interval);
-  }, []); // empty — intentional; interval reads from ref, not state
-
-  const currentValue = history[history.length - 1]?.value ?? 4.2;
-  const baseline = 4.2;
-
-  const zScore = Math.max(0, (currentValue - baseline) / 2);
-
-  const severity: Severity =
-    currentValue > 50
-      ? "CRITICAL"
-      : zScore >= 8
-        ? "HIGH"
-        : zScore >= 5
-          ? "MEDIUM"
-          : zScore >= 3
-            ? "LOW"
-            : "LOW";
-
-  const isAnomaly = currentValue > baseline * 2;
-
-  // Create a demo alert when the simulated stream enters an anomaly.
-  //
-  // Only `isAnomaly` and `incidentActive` drive this effect. The other values
-  // (severity, currentValue, zScore) change every tick during a spike and
-  // would fire this handler repeatedly — each time racing the incidentActive
-  // guard on the very first tick. Snapshotting them from the closure is safe:
-  // they're derived from `history` which is already up to date by the time
-  // this effect runs.
-  useEffect(() => {
-    if (!isAnomaly || incidentActive) return;
-
-    const newAlert: Alert = {
-      id: crypto.randomUUID(),
-      incident_id: `INC-${String(Date.now()).slice(-4)}`,
-      severity,
-      signal_type: "ERROR_RATE",
-      value: Number(currentValue.toFixed(2)),
-      baseline,
-      z_score: Number(zScore.toFixed(2)),
-      reason: "Error rate significantly above the learned baseline",
-      status: "OPEN",
-      created_at: new Date().toLocaleTimeString(),
-    };
-
-    setAlerts((previous) => [newAlert, ...previous].slice(0, 10));
-    setSelectedAlert(newAlert);
-    setIncidentActive(true);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAnomaly, incidentActive]); // severity/currentValue/zScore intentionally omitted
-
-  // Resolve the simulated incident after the spike disappears.
-  useEffect(() => {
-    if (incidentActive && !isAnomaly && currentValue < baseline * 1.5) {
-      setIncidentActive(false);
-    }
-  }, [incidentActive, isAnomaly, currentValue, baseline]);
+  const [currentValue, setCurrentValue] = useState(0);
+  const [baseline, setBaseline] = useState(0);
+  const [zScore, setZScore] = useState(0);
+  const [severity, setSeverity] = useState<Severity>("LOW");
 
   // Keep the drawer in sync: if the alert displayed in the drawer is updated
   // elsewhere (ack/silence from another session, or a status push over WS),
@@ -144,51 +47,48 @@ function Dashboard() {
   }, [alerts, selectedAlert]);
 
   // ---------------------------------------------------------------------------
-  // Polling fallback (swap in when WS is unavailable / during demo mode).
-  //
-  // Uncomment and point POLL_URL at your REST history endpoint.
-  // The hook uses a stable callback ref so it won't re-register on every render.
+  // Live WebSocket Integration
   // ---------------------------------------------------------------------------
-  // const POLL_URL = "http://localhost:8000/api/alerts";
-  // const POLL_INTERVAL_MS = 5_000;
-  //
-  // const handlePolledAlerts = useCallback((fetched: Alert[]) => {
-  //   setAlerts((previous) => {
-  //     const existingIds = new Set(previous.map((a) => a.id));
-  //     const newOnes = fetched.filter((a) => !existingIds.has(a.id));
-  //     return [...newOnes, ...previous].slice(0, 10);
-  //   });
-  // }, []);
-  //
-  // useEffect(() => {
-  //   let cancelled = false;
-  //   async function poll() {
-  //     try {
-  //       const res = await fetch(POLL_URL);
-  //       if (!res.ok) return;
-  //       const data: Alert[] = await res.json();
-  //       if (!cancelled) handlePolledAlerts(data);
-  //     } catch { /* network error — silently retry */ }
-  //   }
-  //   poll();
-  //   const id = window.setInterval(poll, POLL_INTERVAL_MS);
-  //   return () => { cancelled = true; window.clearInterval(id); };
-  // }, [handlePolledAlerts]);
+  const handleWSMessage = useCallback((message: any) => {
+    if (message.type === "snapshot") {
+      setAlerts(message.data.alerts || []);
+    } else if (message.type === "alert") {
+      const alert = message.data;
+      setAlerts((previous) => {
+        const existing = previous.findIndex(a => a.id === alert.id);
+        if (existing !== -1) {
+          const next = [...previous];
+          next[existing] = alert;
+          return next;
+        }
+        return [alert, ...previous].slice(0, 10);
+      });
+      if (alert.status === "OPEN") {
+         setSelectedAlert(alert);
+         setIncidentActive(true);
+      } else if (alert.status === "RESOLVED") {
+         setIncidentActive(false);
+      }
+    } else if (message.type === "metric") {
+      const tick = message.data;
+      
+      setCurrentValue(tick.error_rate ?? 0);
+      setBaseline(tick.baseline ?? 0);
+      setZScore(tick.z ?? 0);
+      setSeverity((tick.severity as Severity) || "LOW");
 
-  // ---------------------------------------------------------------------------
-  // Live WebSocket (uncomment once Kostubh's ws.py hub is up).
-  // Replace the simulated interval above with this.
-  // ---------------------------------------------------------------------------
-  // const handleWSMessage = useCallback((alert: Alert) => {
-  //   setAlerts((previous) => [alert, ...previous].slice(0, 10));
-  //   setSelectedAlert(alert);
-  //   setIncidentActive(true);
-  // }, []);
-  //
-  // useWebSocket<Alert>("ws://localhost:8000/ws/alerts", handleWSMessage, {
-  //   onOpen: () => console.info("[TREMOR] WS connected"),
-  //   onError: (e) => console.warn("[TREMOR] WS error", e),
-  // });
+      setHistory((prev) => {
+         const val = tick.error_rate ?? 0;
+         const base = tick.baseline ?? 0;
+         return [...prev.slice(-(MAX_POINTS - 1)), { value: val, baseline: base }];
+      });
+    }
+  }, []);
+
+  useWebSocket<any>("ws://localhost:8000/ws/alerts", handleWSMessage, {
+    onOpen: () => console.info("[TREMOR] WS connected"),
+    onError: (e) => console.warn("[TREMOR] WS error", e),
+  });
 
   const chart = useMemo(() => {
     const width = 1000;
