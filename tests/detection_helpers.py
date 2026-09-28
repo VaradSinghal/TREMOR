@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 def make_settings(**overrides: Any) -> Settings:
     """Settings from code defaults only, so a developer's .env cannot change test results."""
-    return Settings(_env_file=None, **overrides)  # type: ignore[call-arg]
+    return Settings(_env_file=None, **overrides)
 
 
 def obs(arrival: float, level: str = "INFO", **kwargs: Any) -> Observation:
