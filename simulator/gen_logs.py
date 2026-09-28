@@ -33,7 +33,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, NamedTuple, TextIO
 
-from simulator.scenarios import SCENARIOS, Scenario
+from simulator.scenarios import SCENARIOS, InjectedTemplate, Scenario
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator, Sequence
@@ -208,6 +208,7 @@ class LogGenerator:
         self._start_ts = start_ts
         self._services = tuple(services)
         self._profiles = {p.name: p for p in self._services}
+        self._plans = {p.name: scenario.plan_for(p.name) for p in self._services}
         self._adhoc_rng = random.Random(f"{self._seed}:adhoc")
 
     @property
@@ -220,6 +221,12 @@ class LogGenerator:
     def iter_lines(self) -> Iterator[GeneratedLine]:
         """Yield every line of the scenario in timestamp order, in virtual time."""
         streams = [self._service_stream(i, p) for i, p in enumerate(self._services)]
+        base = len(streams)
+        streams += [
+            self._injected_stream(base + i, inj) for i, inj in enumerate(self._scenario.injected)
+        ]
+        if self._scenario.malformed_ratio > 0:
+            streams.append(self._malformed_stream(base + len(self._scenario.injected)))
         for ts_ms, _idx, _seq, line in heapq.merge(*streams):
             yield GeneratedLine(ts_ms / 1000, line)
 
@@ -260,7 +267,7 @@ class LogGenerator:
             raise ValueError("speed must be positive")
         out = Path(path)
         out.parent.mkdir(parents=True, exist_ok=True)
-        rotations = sorted(rotate_at_s or ())
+        rotations = sorted(self._scenario.rotate_at_s if rotate_at_s is None else rotate_at_s)
         batch: list[str] = []
         written = 0
         current = 0
@@ -313,13 +320,53 @@ class LogGenerator:
         return profile.base_rate_per_s * hour_of_day_factor(ts) * self._volume_mult(profile, t_rel)
 
     def _volume_mult(self, profile: ServiceProfile, t_rel: float) -> float:
-        return 1.0
+        plan = self._plans.get(profile.name)
+        return plan.volume_mult.value_at(t_rel) if plan else 1.0
 
     def _error_rate(self, profile: ServiceProfile, t_rel: float) -> float:
-        return profile.error_rate
+        plan = self._plans.get(profile.name)
+        if plan is None or plan.error_rate is None:
+            return profile.error_rate
+        return plan.error_rate.value_at(t_rel)
 
     def _latency_mult(self, profile: ServiceProfile, t_rel: float) -> float:
-        return 1.0
+        plan = self._plans.get(profile.name)
+        return plan.latency_mult.value_at(t_rel) if plan else 1.0
+
+    def _injected_stream(
+        self, idx: int, inj: InjectedTemplate
+    ) -> Iterator[tuple[int, int, int, str]]:
+        """Poisson lines from an injected template over ``[start_s, end_s)``."""
+        rng = random.Random(f"{self._seed}:inject:{idx}")
+        profile = self._profiles[inj.service]
+        seq = 0
+        t_rel = inj.start_s + rng.expovariate(inj.rate_per_s)
+        while t_rel < min(inj.end_s, self._scenario.duration_s):
+            latency = self._latency(rng, profile, t_rel)
+            ts_ms = round((self._start_ts + t_rel) * 1000)
+            yield ts_ms, idx, seq, self._render(
+                rng, profile, inj.level, ts_ms, latency, template=inj.template
+            )
+            seq += 1
+            t_rel += rng.expovariate(inj.rate_per_s)
+
+    def _malformed_stream(self, idx: int) -> Iterator[tuple[int, int, int, str]]:
+        """Garbage lines at ``ratio / (1 - ratio)`` times the normal volume."""
+        rng = random.Random(f"{self._seed}:malformed")
+        ratio = self._scenario.malformed_ratio
+        seq = 0
+        for second in range(self._scenario.duration_s):
+            base = self._start_ts + second
+            normal = sum(self._rate(p, second, base) for p in self._services)
+            lam = normal * ratio / (1.0 - ratio)
+            if lam <= 0:
+                continue
+            offset = rng.expovariate(lam)
+            while offset < 1.0:
+                ts_ms = round((base + offset) * 1000)
+                yield ts_ms, idx, seq, _malformed_line(rng, ts_ms)
+                seq += 1
+                offset += rng.expovariate(lam)
 
     def _level(self, rng: random.Random, profile: ServiceProfile, t_rel: float) -> str:
         roll = rng.random()
@@ -335,9 +382,16 @@ class LogGenerator:
         return round(p50 * math.exp(LATENCY_SIGMA * rng.gauss(0.0, 1.0)), 1)
 
     def _render(
-        self, rng: random.Random, profile: ServiceProfile, level: str, ts_ms: int, latency: float
+        self,
+        rng: random.Random,
+        profile: ServiceProfile,
+        level: str,
+        ts_ms: int,
+        latency: float,
+        template: str | None = None,
     ) -> str:
-        template = rng.choice(_TEMPLATES[profile.name][level])
+        if template is None:
+            template = rng.choice(_TEMPLATES[profile.name][level])
         message = template.format_map(_Fill(rng, round(latency)))
         stamp = format_ts(ts_ms)
         if profile.fmt == "json":
@@ -350,6 +404,20 @@ class LogGenerator:
             }
             return json.dumps(record, separators=(",", ":"))
         return f"{stamp} {LEVEL_TEXT[level]} {profile.name} {message}"
+
+
+def _malformed_line(rng: random.Random, ts_ms: int) -> str:
+    """A line the parser must reject: truncated JSON, no timestamp, stack frame, junk."""
+    stamp = format_ts(ts_ms)
+    kind = rng.randrange(4)
+    if kind == 0:
+        full = f'{{"timestamp":"{stamp}","level":"error","service":"ledger","message":"x"}}'
+        return full[: rng.randint(10, len(full) - 2)]
+    if kind == 1:
+        return f"ERROR payment-gateway upstream reset by peer after {rng.randint(1, 900)}ms"
+    if kind == 2:
+        return f"    at com.pay.gateway.Charge.run(Charge.java:{rng.randint(10, 999)})"
+    return "".join(rng.choice("\x00\x01\x1b#%&?~\ufffd") for _ in range(rng.randint(5, 40)))
 
 
 def _flush(fh: TextIO, batch: list[str]) -> int:

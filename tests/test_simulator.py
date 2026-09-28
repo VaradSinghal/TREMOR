@@ -31,9 +31,7 @@ if TYPE_CHECKING:
 
 
 def short(duration_s: int = 60, seed: int = 7) -> Scenario:
-    return Scenario(
-        name="short", description="", duration_s=duration_s, seed=seed, expected_anomalies=[]
-    )
+    return Scenario(name="short", description="", duration_s=duration_s, seed=seed)
 
 
 def offline_text(gen: LogGenerator) -> str:
