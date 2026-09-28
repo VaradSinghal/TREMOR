@@ -4,8 +4,6 @@ TREMOR — Redaction tests.
 
 from __future__ import annotations
 
-import pytest
-
 from app.ingest.redact import _luhn_checksum, redact
 
 
@@ -37,7 +35,7 @@ class TestRedact:
     def test_redact_api_key(self) -> None:
         text = "Key is AKIAIOSFODNN7EXAMPLE for AWS"
         assert redact(text) == "Key is <API_KEY> for AWS"
-        
+
         text2 = "Using sk_live_1234567890abcdef12345678 for Stripe"
         assert redact(text2) == "Using <API_KEY> for Stripe"
 
