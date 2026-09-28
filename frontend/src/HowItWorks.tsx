@@ -49,24 +49,6 @@ function HowItWorks() {
 
   return (
     <div className="how-page">
-      <nav className="how-nav">
-        <Link to="/" className="how-logo">
-          TREMOR<span>.</span>
-        </Link>
-
-        <div className="how-nav-links">
-          <Link to="/">Home</Link>
-          <Link to="/dashboard">Dashboard</Link>
-          <Link to="/how-it-works" className="active">
-            How it works
-          </Link>
-        </div>
-
-        <Link to="/dashboard" className="how-nav-button">
-          Open Dashboard
-        </Link>
-      </nav>
-
       <main>
         <section className="how-hero">
           <div className="how-eyebrow">UNDER THE HOOD</div>

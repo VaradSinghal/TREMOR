@@ -127,19 +127,6 @@ function Dashboard() {
     <div className="app">
       <div className="glow-bg"></div>
       
-      <header className="topbar">
-        <div className="brand-container">
-          <div className="brand">
-            <Zap size={24} className="brand-icon" />
-            TREMOR
-          </div>
-        </div>
-        <div className="system-status">
-          <span className="status-dot pulse" />
-          WS LIVE
-        </div>
-      </header>
-
       <main className="dashboard">
         
         {/* PIPELINE VISUALIZATION */}

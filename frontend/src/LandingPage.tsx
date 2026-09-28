@@ -4,24 +4,6 @@ import "./LandingPage.css";
 function LandingPage() {
   return (
     <div className="landing-page">
-      <nav className="landing-nav">
-        <div className="landing-logo">TREMOR</div>
-
-        <div className="landing-nav-links">
-          <Link to="/how-it-works">How it works</Link>
-
-          <Link to="/dashboard">Dashboard</Link>
-
-          <a
-            href="https://github.com/VaradSinghal/TREMOR"
-            target="_blank"
-            rel="noreferrer"
-          >
-            GitHub
-          </a>
-        </div>
-      </nav>
-
       <main className="landing-hero">
         <section>
           <div className="landing-eyebrow">
