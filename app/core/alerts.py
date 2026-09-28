@@ -37,22 +37,49 @@ class SignalType(StrEnum):
     LATENCY = "LATENCY"
 
 
+from dataclasses import dataclass, field
+from typing import Any
+
+@dataclass
+class TemplateHint:
+    template_id: int
+    pattern: str
+    count: int
+
+@dataclass
+class TimelineEvent:
+    ts: float
+    status: AlertStatus
+    reason: str
+
+@dataclass
+class Alert:
+    id: str
+    service: str
+    signal_type: SignalType
+    status: AlertStatus
+    severity: str
+    explanation: dict[str, Any] = field(default_factory=dict)
+    timeline: list[TimelineEvent] = field(default_factory=list)
+    samples: list[str] = field(default_factory=list)
+    top_templates: list[TemplateHint] = field(default_factory=list)
+    created_at: float = 0.0
+    updated_at: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "service": self.service,
+            "signal_type": self.signal_type.value,
+            "status": self.status.value,
+            "severity": self.severity,
+            "explanation": self.explanation,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
 # TODO: Implement in Phase 3
 # Key interfaces:
-#   @dataclass
-#   class Alert:
-#       id: str
-#       service: str
-#       signal_type: SignalType
-#       status: AlertStatus
-#       severity: Severity
-#       explanation: dict
-#       timeline: list[TimelineEvent]
-#       samples: list[str]
-#       top_templates: list[TemplateHint]
-#       created_at: float
-#       updated_at: float
-#
 #   class AlertManager:
 #       def __init__(self, clock, cooldown_s): ...
 #       def process_signal(self, signal) -> Alert | None: ...
